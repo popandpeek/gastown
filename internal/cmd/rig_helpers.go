@@ -112,8 +112,8 @@ func IsRigParkedOrDocked(townRoot, rigName string) (bool, string) {
 	}
 
 	// Single bead lookup for both parked and docked labels.
-	// Look up the beads prefix from rigs.json (the rig registry) instead of
-	// <rigPath>/config.json which doesn't exist for most rigs.
+	// Look up the beads prefix from rigs.json (the rig registry), with fallback
+	// to the rig's own config.json for isolated/test scenarios.
 	rigPath := filepath.Join(townRoot, rigName)
 	prefix := rigBeadsPrefix(townRoot, rigPath, rigName)
 	if prefix == "" {
