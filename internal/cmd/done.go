@@ -562,6 +562,35 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Default: "mr" strategy (or no convoy) — push branch, create MR bead
 
+		// ENFORCEMENT: Verify all molecule steps are closed before completing (be-480io).
+		// If the hooked bead has an attached_molecule, all child step beads must be
+		// status=closed. This prevents agents from skipping formula steps.
+		// Only applies to COMPLETED — DEFERRED/ESCALATED bypass intentionally.
+		if issueID != "" {
+			molBd := beads.New(cwd)
+			if hookedIssue, showErr := molBd.Show(issueID); showErr == nil {
+				if af := beads.ParseAttachmentFields(hookedIssue); af != nil && af.AttachedMolecule != "" {
+					molChildren, listErr := molBd.List(beads.ListOptions{
+						Parent:   af.AttachedMolecule,
+						Status:   "all",
+						Priority: -1,
+					})
+					if listErr == nil && len(molChildren) > 0 {
+						var unclosed []string
+						for _, child := range molChildren {
+							if child.Status != "closed" {
+								unclosed = append(unclosed, fmt.Sprintf("  %s [%s]: %s", child.ID, child.Status, child.Title))
+							}
+						}
+						if len(unclosed) > 0 {
+							return fmt.Errorf("cannot complete: %d molecule step(s) not closed:\n%s\n\nComplete each step with: gt mol step done <step-id>\nOr use --status DEFERRED to exit without completing",
+								len(unclosed), strings.Join(unclosed, "\n"))
+						}
+					}
+				}
+			}
+		}
+
 		// Pre-declare push variables for checkpoint goto (gt-aufru)
 		var refspec string
 		var pushErr error
