@@ -93,9 +93,10 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 		fmt.Println(style.Bold.Render("→ EXECUTE THIS STEP NOW."))
 		fmt.Println()
 		fmt.Println("When complete:")
-		fmt.Printf("  1. Close the step: bd close %s\n", step.ID)
-		fmt.Printf("  2. Check for next step: bd mol current %s\n", moleculeID)
-		fmt.Println("  3. Continue until molecule complete")
+		fmt.Printf("  1. Complete this step: gt mol step done %s\n", step.ID)
+		fmt.Println("     (This closes the step AND auto-continues to the next one)")
+		fmt.Println("     DO NOT use 'bd close' directly — it skips auto-continuation.")
+		fmt.Println("  2. Continue until molecule complete")
 	} else {
 		// No next step - molecule may be complete
 		fmt.Println(style.Bold.Render("✓ MOLECULE COMPLETE"))
