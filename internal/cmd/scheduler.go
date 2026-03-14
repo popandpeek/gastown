@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -17,11 +19,13 @@ import (
 )
 
 var (
-	schedulerStatusJSON bool
-	schedulerListJSON   bool
-	schedulerClearBead  string
-	schedulerRunBatch   int
-	schedulerRunDryRun  bool
+	schedulerStatusJSON    bool
+	schedulerListJSON      bool
+	schedulerClearBead     string
+	schedulerRunBatch      int
+	schedulerRunDryRun     bool
+	schedulerRunBead       string
+	schedulerReorderBy     string
 )
 
 var schedulerCmd = &cobra.Command{
@@ -37,6 +41,9 @@ Subcommands:
   gt scheduler pause     # Pause dispatch
   gt scheduler resume    # Resume dispatch
   gt scheduler clear     # Remove beads from scheduler
+  gt scheduler promote   # Move bead to front of queue
+  gt scheduler demote    # Move bead to back of queue
+  gt scheduler reorder   # Reorder queue by priority
 
 Config:
   gt config set scheduler.max_polecats 5    # Enable deferred dispatch
@@ -88,8 +95,42 @@ but can be run ad-hoc. Useful for testing or when the daemon is not running.
 
   gt scheduler run                  # Dispatch using config defaults
   gt scheduler run --batch 5        # Dispatch up to 5
-  gt scheduler run --dry-run        # Preview what would dispatch`,
+  gt scheduler run --dry-run        # Preview what would dispatch
+  gt scheduler run --bead gt-abc    # Dispatch only this specific bead`,
 	RunE: runSchedulerRun,
+}
+
+var schedulerPromoteCmd = &cobra.Command{
+	Use:   "promote <bead-id>",
+	Short: "Move a bead to the front of the dispatch queue",
+	Long: `Move a scheduled bead to the front of the queue by setting its
+EnqueuedAt timestamp to epoch. The bead will be dispatched first on
+the next scheduler cycle (subject to readiness and capacity).`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSchedulerPromote,
+}
+
+var schedulerDemoteCmd = &cobra.Command{
+	Use:   "demote <bead-id>",
+	Short: "Move a bead to the back of the dispatch queue",
+	Long: `Move a scheduled bead to the back of the queue by setting its
+EnqueuedAt timestamp to now. The bead will be dispatched after all
+currently queued beads.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSchedulerDemote,
+}
+
+var schedulerReorderCmd = &cobra.Command{
+	Use:   "reorder",
+	Short: "Reorder the dispatch queue by a field",
+	Long: `Reorder all scheduled beads by the specified field.
+
+  gt scheduler reorder --by priority    # P0 first, then P1, P2, etc.
+
+This reassigns EnqueuedAt timestamps so that higher-priority beads
+are dispatched before lower-priority ones. Within the same priority
+level, original FIFO order is preserved.`,
+	RunE: runSchedulerReorder,
 }
 
 func init() {
@@ -105,6 +146,11 @@ func init() {
 	// Run flags
 	schedulerRunCmd.Flags().IntVar(&schedulerRunBatch, "batch", 0, "Override batch size (0 = use config)")
 	schedulerRunCmd.Flags().BoolVar(&schedulerRunDryRun, "dry-run", false, "Preview what would dispatch")
+	schedulerRunCmd.Flags().StringVar(&schedulerRunBead, "bead", "", "Dispatch only this specific bead")
+
+	// Reorder flags
+	schedulerReorderCmd.Flags().StringVar(&schedulerReorderBy, "by", "", "Field to reorder by (currently: priority)")
+	_ = schedulerReorderCmd.MarkFlagRequired("by")
 
 	// Build command tree (flat — no intermediary "capacity" level)
 	schedulerCmd.AddCommand(schedulerStatusCmd)
@@ -113,6 +159,9 @@ func init() {
 	schedulerCmd.AddCommand(schedulerResumeCmd)
 	schedulerCmd.AddCommand(schedulerClearCmd)
 	schedulerCmd.AddCommand(schedulerRunCmd)
+	schedulerCmd.AddCommand(schedulerPromoteCmd)
+	schedulerCmd.AddCommand(schedulerDemoteCmd)
+	schedulerCmd.AddCommand(schedulerReorderCmd)
 
 	rootCmd.AddCommand(schedulerCmd)
 }
@@ -351,13 +400,82 @@ func runSchedulerClear(cmd *cobra.Command, args []string) error {
 }
 
 func runSchedulerRun(cmd *cobra.Command, args []string) error {
+	if schedulerRunBead != "" && schedulerRunBatch > 0 {
+		return fmt.Errorf("--bead and --batch are mutually exclusive")
+	}
+
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return err
 	}
 
+	// --bead: dispatch a single specific bead directly
+	if schedulerRunBead != "" {
+		return runSchedulerRunBead(townRoot, schedulerRunBead, schedulerRunDryRun)
+	}
+
 	_, err = dispatchScheduledWork(townRoot, detectActor(), schedulerRunBatch, schedulerRunDryRun)
 	return err
+}
+
+// runSchedulerRunBead dispatches a single specific bead from the scheduler queue.
+func runSchedulerRunBead(townRoot, beadID string, dryRun bool) error {
+	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+
+	ctx, fields, err := townBeads.FindOpenSlingContext(beadID)
+	if err != nil {
+		return fmt.Errorf("finding sling context: %w", err)
+	}
+	if ctx == nil || fields == nil {
+		return fmt.Errorf("no sling context found for %s\nUse 'gt scheduler list' to see scheduled beads", beadID)
+	}
+
+	if fields.DispatchFailures >= maxDispatchFailures {
+		return fmt.Errorf("bead %s is circuit-broken (%d failures) — use 'gt scheduler clear --bead %s' to reset",
+			beadID, fields.DispatchFailures, beadID)
+	}
+
+	pending := capacity.PendingBead{
+		ID:          ctx.ID,
+		WorkBeadID:  fields.WorkBeadID,
+		Title:       ctx.Title,
+		TargetRig:   fields.TargetRig,
+		Description: ctx.Description,
+		Context:     fields,
+	}
+
+	if dryRun {
+		fmt.Printf("%s Would dispatch %s → %s\n", style.Bold.Render("→"), beadID, fields.TargetRig)
+		return nil
+	}
+
+	result, err := dispatchSingleBead(pending, townRoot, detectActor())
+	if err != nil {
+		return fmt.Errorf("dispatching %s: %w", beadID, err)
+	}
+
+	// Close the context after successful dispatch
+	if closeErr := townBeads.CloseSlingContext(ctx.ID, "dispatched-manual"); closeErr != nil {
+		style.PrintWarning("dispatch succeeded but context close failed: %v", closeErr)
+	}
+
+	polecatName := ""
+	if result != nil {
+		polecatName = result.PolecatName
+	}
+
+	fmt.Printf("%s Dispatched %s → %s", style.Bold.Render("✓"), beadID, fields.TargetRig)
+	if polecatName != "" {
+		fmt.Printf(" (polecat: %s)", polecatName)
+	}
+	fmt.Println()
+
+	// Wake rig agents
+	if fields.TargetRig != "" {
+		wakeRigAgents(fields.TargetRig)
+	}
+
+	return nil
 }
 
 // listScheduledBeads returns info about all scheduled beads for display.
@@ -479,6 +597,199 @@ func beadsSearchDirs(townRoot string) []string {
 		}
 	}
 	return dirs
+}
+
+// runSchedulerPromote moves a bead to the front of the dispatch queue.
+func runSchedulerPromote(cmd *cobra.Command, args []string) error {
+	beadID := args[0]
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+	updated, err := updateEnqueuedAt(townBeads, beadID, "0001-01-01T00:00:00Z")
+	if err != nil {
+		return err
+	}
+
+	state, _ := capacity.LoadState(townRoot)
+
+	fmt.Printf("%s Promoted %s to front of queue (%d context(s) updated)\n",
+		style.Bold.Render("⬆"), beadID, updated)
+	if state != nil && state.Paused {
+		fmt.Printf("  %s Scheduler is paused — bead will dispatch when resumed\n", style.Dim.Render("ℹ"))
+	}
+	return nil
+}
+
+// runSchedulerDemote moves a bead to the back of the dispatch queue.
+func runSchedulerDemote(cmd *cobra.Command, args []string) error {
+	beadID := args[0]
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+	updated, err := updateEnqueuedAt(townBeads, beadID, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return err
+	}
+
+	state, _ := capacity.LoadState(townRoot)
+
+	fmt.Printf("%s Demoted %s to back of queue (%d context(s) updated)\n",
+		style.Bold.Render("⬇"), beadID, updated)
+	if state != nil && state.Paused {
+		fmt.Printf("  %s Scheduler is paused — bead will dispatch when resumed\n", style.Dim.Render("ℹ"))
+	}
+	return nil
+}
+
+// updateEnqueuedAt finds all open sling contexts for a work bead and updates
+// their EnqueuedAt timestamp. Returns the number of contexts updated.
+func updateEnqueuedAt(townBeads *beads.Beads, workBeadID, newTimestamp string) (int, error) {
+	contexts, err := townBeads.ListOpenSlingContexts()
+	if err != nil {
+		return 0, fmt.Errorf("listing sling contexts: %w", err)
+	}
+
+	updated := 0
+	for _, ctx := range contexts {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields == nil || fields.WorkBeadID != workBeadID {
+			continue
+		}
+		if fields.DispatchFailures >= maxDispatchFailures {
+			fmt.Printf("  %s Skipping circuit-broken context %s\n", style.Dim.Render("⚠"), ctx.ID)
+			continue
+		}
+		fields.EnqueuedAt = newTimestamp
+		if err := townBeads.UpdateSlingContextFields(ctx.ID, fields); err != nil {
+			fmt.Printf("  %s Could not update context %s: %v\n", style.Dim.Render("Warning:"), ctx.ID, err)
+			continue
+		}
+		updated++
+	}
+
+	if updated == 0 {
+		return 0, fmt.Errorf("no sling context found for %s\nUse 'gt scheduler list' to see scheduled beads", workBeadID)
+	}
+
+	return updated, nil
+}
+
+// runSchedulerReorder reorders the entire queue by the specified field.
+func runSchedulerReorder(cmd *cobra.Command, args []string) error {
+	if schedulerReorderBy != "priority" {
+		return fmt.Errorf("unsupported reorder field %q (supported: priority)", schedulerReorderBy)
+	}
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+	contexts, err := townBeads.ListOpenSlingContexts()
+	if err != nil {
+		return fmt.Errorf("listing sling contexts: %w", err)
+	}
+
+	if len(contexts) == 0 {
+		fmt.Println("No beads scheduled — nothing to reorder.")
+		return nil
+	}
+
+	// Parse all contexts and collect work bead IDs
+	type contextEntry struct {
+		ctx    *beads.Issue
+		fields *capacity.SlingContextFields
+	}
+	var entries []contextEntry
+	var workBeadIDs []string
+
+	for _, ctx := range contexts {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields == nil {
+			continue
+		}
+		if fields.DispatchFailures >= maxDispatchFailures {
+			continue // Skip circuit-broken
+		}
+		entries = append(entries, contextEntry{ctx: ctx, fields: fields})
+		workBeadIDs = append(workBeadIDs, fields.WorkBeadID)
+	}
+
+	if len(entries) == 0 {
+		fmt.Println("No active contexts to reorder.")
+		return nil
+	}
+
+	// Batch-fetch priorities for work beads
+	priorities := batchFetchBeadPriorities(townRoot, workBeadIDs)
+
+	// Sort entries by priority (P0=0 first), preserving FIFO within same priority
+	sort.SliceStable(entries, func(i, j int) bool {
+		pi := priorities[entries[i].fields.WorkBeadID]
+		pj := priorities[entries[j].fields.WorkBeadID]
+		return pi < pj
+	})
+
+	// Reassign EnqueuedAt timestamps: start from a base time, increment 1s each
+	baseTime, _ := time.Parse(time.RFC3339, "2000-01-01T00:00:00Z")
+	updated := 0
+	for i, entry := range entries {
+		newTime := baseTime.Add(time.Duration(i) * time.Second).Format(time.RFC3339)
+		entry.fields.EnqueuedAt = newTime
+		if err := townBeads.UpdateSlingContextFields(entry.ctx.ID, entry.fields); err != nil {
+			fmt.Printf("  %s Could not update %s: %v\n", style.Dim.Render("Warning:"), entry.fields.WorkBeadID, err)
+			continue
+		}
+		updated++
+	}
+
+	fmt.Printf("%s Reordered %d beads by priority\n", style.Bold.Render("↕"), updated)
+
+	// Show new order
+	for i, entry := range entries {
+		p := priorities[entry.fields.WorkBeadID]
+		fmt.Printf("  %d. P%d %s\n", i+1, p, entry.fields.WorkBeadID)
+	}
+
+	return nil
+}
+
+// batchFetchBeadPriorities returns a map of bead ID → priority (int, 0=P0).
+// Beads not found default to priority 2 (P2).
+func batchFetchBeadPriorities(townRoot string, ids []string) map[string]int {
+	result := make(map[string]int)
+	for _, id := range ids {
+		result[id] = 2 // Default P2
+	}
+	if len(ids) == 0 {
+		return result
+	}
+
+	for _, dir := range beadsSearchDirs(townRoot) {
+		b := beads.New(dir)
+		args := append([]string{"show", "--json"}, ids...)
+		out, err := b.Run(args...)
+		if err != nil {
+			continue
+		}
+		var items []struct {
+			ID       string `json:"id"`
+			Priority int    `json:"priority"`
+		}
+		if err := json.Unmarshal(out, &items); err == nil {
+			for _, item := range items {
+				result[item.ID] = item.Priority
+			}
+		}
+	}
+	return result
 }
 
 // countActivePolecats counts all running polecats across all rigs in the town.
