@@ -31,7 +31,7 @@ var DefaultPalette = []Theme{
 // MayorTheme returns the special theme for the Mayor session.
 // Gold/dark to distinguish it from rig themes.
 func MayorTheme() Theme {
-	return Theme{Name: "mayor", BG: "#3d3200", FG: "#ffd700"}
+	return Theme{Name: "mayor", BG: "#3d3200", FG: "#e0e0e0"}
 }
 
 // DeaconTheme returns the special theme for the Deacon session.
