@@ -526,7 +526,8 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// Push submodule changes before direct push (gt-dzs)
 			pushSubmoduleChanges(g, defaultBranch)
 			directRefspec := branch + ":" + defaultBranch
-			directPushErr := g.Push("origin", directRefspec, false)
+			// Use PushWithEnv to bypass pre-push hook for authorized direct-merge pushes
+			directPushErr := g.PushWithEnv("origin", directRefspec, false, []string{"GT_ALLOW_PROTECTED_PUSH=1"})
 			if directPushErr != nil {
 				pushFailed = true
 				errMsg := fmt.Sprintf("direct push to %s failed: %v", defaultBranch, directPushErr)
@@ -758,7 +759,8 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 			// Push branch directly to main (the earlier push went to origin/<branch>)
 			directRefspec := branch + ":" + defaultBranch
-			directPushErr := g.Push("origin", directRefspec, false)
+			// Use PushWithEnv to bypass pre-push hook for authorized direct-merge pushes
+			directPushErr := g.PushWithEnv("origin", directRefspec, false, []string{"GT_ALLOW_PROTECTED_PUSH=1"})
 			if directPushErr != nil {
 				// Direct push failed — fall through to normal MR creation
 				style.PrintWarning("late direct push to %s failed: %v — falling through to MR", defaultBranch, directPushErr)
