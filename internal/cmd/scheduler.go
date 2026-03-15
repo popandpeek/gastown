@@ -794,6 +794,12 @@ func batchFetchBeadPriorities(townRoot string, ids []string) map[string]int {
 
 // countActivePolecats counts all running polecats across all rigs in the town.
 func countActivePolecats() int {
+	return countActivePolecatsForRig("")
+}
+
+// countActivePolecatsForRig counts running polecats, optionally filtered by rig name.
+// If rigName is empty, counts all polecats across all rigs.
+func countActivePolecatsForRig(rigName string) int {
 	listCmd := tmux.BuildCommand("list-sessions", "-F", "#{session_name}")
 	out, err := listCmd.Output()
 	if err != nil {
@@ -810,7 +816,9 @@ func countActivePolecats() int {
 			continue
 		}
 		if identity.Role == session.RolePolecat {
-			count++
+			if rigName == "" || identity.Rig == rigName {
+				count++
+			}
 		}
 	}
 	return count

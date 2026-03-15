@@ -99,14 +99,24 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("admission control: %w", err)
 	}
 
-	// Polecat count cap (clown show #22): refuse to spawn if there are already
-	// too many active polecats. This is a last-resort safety net for the direct-dispatch
-	// path. For configurable capacity gating, use scheduler.max_polecats in town settings
-	// (see internal/scheduler/capacity/).
+	// Per-rig polecat cap: refuse to spawn if this rig already has too many
+	// active polecats. Reads max_polecats from rig config (wisp → bead → system default 10).
+	// Configurable via: gt rig config set <rig> max_polecats <N>
+	rigMaxPolecats := r.GetIntConfig("max_polecats")
+	rigActiveCount := countActivePolecatsForRig(rigName)
+	if rigMaxPolecats > 0 && rigActiveCount >= rigMaxPolecats {
+		return nil, fmt.Errorf("rig %s polecat cap reached: %d active (max %d). "+
+			"Adjust with: gt rig config set %s max_polecats <N>",
+			rigName, rigActiveCount, rigMaxPolecats, rigName)
+	}
+
+	// Global polecat cap (clown show #22): last-resort safety net for the
+	// direct-dispatch path. For town-wide capacity gating, use
+	// scheduler.max_polecats in town settings (see internal/scheduler/capacity/).
 	const defaultMaxActivePolecats = 25
 	activeCount := countActivePolecats()
 	if activeCount >= defaultMaxActivePolecats {
-		return nil, fmt.Errorf("polecat cap reached: %d active polecats (max %d). "+
+		return nil, fmt.Errorf("global polecat cap reached: %d active polecats (max %d). "+
 			"This is a safety limit to prevent spawn storms. "+
 			"Investigate why polecats are accumulating before spawning more",
 			activeCount, defaultMaxActivePolecats)
