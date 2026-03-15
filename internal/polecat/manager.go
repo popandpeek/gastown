@@ -2123,12 +2123,23 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		}, nil
 	}
 
-	// Persistent model: has issue = working, otherwise a live tmux session still
-	// means working even if beads state has fallen behind.
+	// Persistent model: has issue = working, otherwise check agent bead state.
+	// In the persistent polecat model (gt-4ac), tmux sessions stay alive after
+	// gt done, so we cannot use tmux liveness to distinguish working from idle.
+	// Instead, trust agent_state=idle when exit_type is present — this means
+	// gt done completed and wrote the exit metadata, distinguishing "done and idle"
+	// from "crashed and idle" (which would have no exit_type).
 	issueID := ""
 	if issue != nil {
 		issueID = issue.ID
+	} else if agentErr == nil && fields != nil &&
+		beads.AgentState(fields.AgentState) == beads.AgentStateIdle &&
+		fields.ExitType != "" {
+		// Agent bead says idle with an exit_type → polecat completed work normally
+		// (gt done wrote exit_type). This is the primary idle detection for persistent polecats.
 	} else if running, stale := m.polecatSessionState(name); running && !stale {
+		// No issue, no idle+exit_type, but live tmux → assume still working.
+		// This covers polecats that are between assignment and bead update.
 		return &Polecat{
 			Name:      name,
 			Rig:       m.rig.Name,
@@ -2138,13 +2149,12 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		}, nil
 	}
 
-	// Persistent polecat model (gt-4ac): only trust agent_state=idle once the
-	// tmux session is gone. This prevents reusing a polecat that still has a live
-	// session when its bead state was cleared early.
 	state := StateIdle
 	if issueID != "" {
 		state = StateWorking
-	} else if agentErr == nil && fields != nil && beads.AgentState(fields.AgentState) == beads.AgentStateIdle {
+	} else if agentErr == nil && fields != nil &&
+		beads.AgentState(fields.AgentState) == beads.AgentStateIdle &&
+		fields.ExitType != "" {
 		state = StateIdle
 	}
 

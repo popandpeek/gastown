@@ -216,17 +216,30 @@ id = "queue-scan"
 title = "Scan merge queue"
 needs = ["inbox-check"]
 description = """
-Check the beads merge queue - this is the SOURCE OF TRUTH for pending merges.
+Check the beads merge queue AND GitHub for pending merges.
 
 ```bash
 git fetch --prune origin
 gt mq list <rig>
 ```
 
-The beads MQ tracks all pending merge requests. Do NOT rely on `git branch -r | grep polecat`
-as branches may exist without MR beads, or MR beads may exist for already-merged work.
+The beads MQ tracks all pending merge requests.
 
-If queue empty, skip to "check-integration-branches" step.
+**Self-healing fallback**: If the MQ is empty, poll GitHub for open PRs as a fallback.
+The signal chain (witness → MERGE_READY → refinery) can break; this ensures PRs
+are never orphaned. Check for open PRs targeting the default branch:
+
+```bash
+gh pr list --base {{target_branch}} --state open --json number,headRefName,title
+```
+
+If open PRs are found that are NOT in the beads MQ:
+1. Create MR beads for them: `gt mq submit <rig> --branch <headRefName> --pr <number>`
+2. Add them to the processing queue for this cycle
+
+This is a FALLBACK — the normal path is event-driven via MERGE_READY.
+
+If queue still empty after fallback check, skip to "check-integration-branches" step.
 
 For each MR in the queue, verify the branch still exists:
 ```bash
@@ -851,7 +864,7 @@ Use await-event to subscribe to the refinery event channel with exponential back
 
 ```bash
 gt mol step await-event --channel refinery --agent-bead gt-<rig>-refinery \
-  --backoff-base 30s --backoff-mult 2 --backoff-max 5m --cleanup
+  --backoff-base 30s --backoff-mult 2 --backoff-max 60s --cleanup
 ```
 
 This command:
@@ -860,8 +873,7 @@ This command:
 3. If no events, times out with exponential backoff:
    - First timeout: 30s
    - Second timeout: 60s
-   - Third timeout: 120s
-   - ...capped at 5 minutes max
+   - ...capped at 60 seconds max (ensures polling at least once per minute)
 4. Tracks `idle:N` label on refinery agent bead for backoff state
 5. `--cleanup` auto-deletes processed event files
 
