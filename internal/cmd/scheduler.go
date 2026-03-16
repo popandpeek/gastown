@@ -800,19 +800,29 @@ func batchFetchBeadPriorities(townRoot string, ids []string) map[string]int {
 	return result
 }
 
-// countActivePolecats counts all running polecats across all rigs in the town.
+// countActivePolecats counts working polecats across all rigs in the town.
+// Excludes idle and done polecats that have completed their work — these
+// are preserved for reuse but should not consume capacity slots.
 func countActivePolecats() int {
 	return countActivePolecatsForRig("")
 }
 
-// countActivePolecatsForRig counts running polecats, optionally filtered by rig name.
+// countActivePolecatsForRig counts working polecats, optionally filtered by rig name.
 // If rigName is empty, counts all polecats across all rigs.
+//
+// A polecat is "active" (consuming a capacity slot) only if it is working.
+// Idle and done polecats have live tmux sessions (persistent model) but are
+// NOT counted — they are available for reuse via FindIdlePolecat.
 func countActivePolecatsForRig(rigName string) int {
 	listCmd := tmux.BuildCommand("list-sessions", "-F", "#{session_name}")
 	out, err := listCmd.Output()
 	if err != nil {
 		return 0
 	}
+
+	// Build set of idle/done polecat names by checking agent beads.
+	// This prevents idle polecats from consuming capacity slots.
+	idlePolecats := idlePolecatNames()
 
 	count := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -825,9 +835,61 @@ func countActivePolecatsForRig(rigName string) int {
 		}
 		if identity.Role == session.RolePolecat {
 			if rigName == "" || identity.Rig == rigName {
+				// Skip idle/done polecats — they don't consume capacity
+				key := identity.Rig + "/" + identity.Name
+				if idlePolecats[key] {
+					continue
+				}
 				count++
 			}
 		}
 	}
 	return count
+}
+
+// idlePolecatNames returns a set of "rig/name" strings for polecats whose
+// agent beads indicate idle or done state with a completed exit_type.
+// These polecats have finished work and are available for reuse.
+func idlePolecatNames() map[string]bool {
+	result := make(map[string]bool)
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return result
+	}
+
+	// Query all agent beads across all rig directories
+	for _, dir := range beadsSearchDirs(townRoot) {
+		b := beads.New(dir)
+		out, err := b.Run("list", "--type=agent", "--json", "--limit=0")
+		if err != nil {
+			continue
+		}
+		var agents []struct {
+			ID          string `json:"id"`
+			Description string `json:"description"`
+		}
+		if err := json.Unmarshal(out, &agents); err != nil {
+			continue
+		}
+		for _, agent := range agents {
+			// Parse the bead ID to get rig and polecat name
+			rig, role, name, ok := beads.ParseAgentBeadID(agent.ID)
+			if !ok || role != "polecat" || name == "" {
+				continue
+			}
+
+			fields := beads.ParseAgentFields(agent.Description)
+			if fields == nil {
+				continue
+			}
+			agentState := beads.AgentState(fields.AgentState)
+			if (agentState == beads.AgentStateIdle || agentState == beads.AgentStateDone) &&
+				fields.ExitType != "" {
+				key := rig + "/" + name
+				result[key] = true
+			}
+		}
+	}
+	return result
 }

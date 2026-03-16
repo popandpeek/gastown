@@ -2126,19 +2126,27 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	// Persistent model: has issue = working, otherwise check agent bead state.
 	// In the persistent polecat model (gt-4ac), tmux sessions stay alive after
 	// gt done, so we cannot use tmux liveness to distinguish working from idle.
-	// Instead, trust agent_state=idle when exit_type is present — this means
-	// gt done completed and wrote the exit metadata, distinguishing "done and idle"
-	// from "crashed and idle" (which would have no exit_type).
+	// Instead, trust agent_state when it indicates completion (idle or done)
+	// and exit_type is present — this means gt done ran and wrote exit metadata,
+	// distinguishing "completed" from "crashed" (which would have no exit_type).
+	//
+	// Both "idle" and "done" are idle-eligible: gt done sets agent_state=idle
+	// directly (gt-1qlg), but if the state update races or partially fails,
+	// the agent may show "done" instead. Either way, the polecat has completed
+	// its work and is available for reuse.
+	agentIsIdleEligible := agentErr == nil && fields != nil &&
+		(beads.AgentState(fields.AgentState) == beads.AgentStateIdle ||
+			beads.AgentState(fields.AgentState) == beads.AgentStateDone) &&
+		fields.ExitType != ""
+
 	issueID := ""
 	if issue != nil {
 		issueID = issue.ID
-	} else if agentErr == nil && fields != nil &&
-		beads.AgentState(fields.AgentState) == beads.AgentStateIdle &&
-		fields.ExitType != "" {
-		// Agent bead says idle with an exit_type → polecat completed work normally
-		// (gt done wrote exit_type). This is the primary idle detection for persistent polecats.
+	} else if agentIsIdleEligible {
+		// Agent bead says idle/done with an exit_type → polecat completed work normally.
+		// This is the primary idle detection for persistent polecats.
 	} else if running, stale := m.polecatSessionState(name); running && !stale {
-		// No issue, no idle+exit_type, but live tmux → assume still working.
+		// No issue, not idle-eligible, but live tmux → assume still working.
 		// This covers polecats that are between assignment and bead update.
 		return &Polecat{
 			Name:      name,
@@ -2152,9 +2160,7 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	state := StateIdle
 	if issueID != "" {
 		state = StateWorking
-	} else if agentErr == nil && fields != nil &&
-		beads.AgentState(fields.AgentState) == beads.AgentStateIdle &&
-		fields.ExitType != "" {
+	} else if agentIsIdleEligible {
 		state = StateIdle
 	}
 

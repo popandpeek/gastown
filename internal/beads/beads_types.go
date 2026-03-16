@@ -456,3 +456,15 @@ func ResetEnsuredDirs() {
 	defer ensuredMu.Unlock()
 	ensuredDirs = make(map[string]bool)
 }
+
+// MarkEnsured marks a beads directory as already having custom types AND
+// statuses configured, populating the in-memory cache. Subsequent calls to
+// EnsureCustomTypes/EnsureCustomStatuses will skip verification for this dir.
+// This is primarily useful for testing with bd stubs that don't implement
+// config get.
+func MarkEnsured(beadsDir string) {
+	ensuredMu.Lock()
+	defer ensuredMu.Unlock()
+	ensuredDirs[beadsDir] = true            // types cache key
+	ensuredDirs[beadsDir+":statuses"] = true // statuses cache key
+}

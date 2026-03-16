@@ -831,15 +831,27 @@ func TestConvoyInfo_IsOwnedDirect(t *testing.T) {
 // createAutoConvoy tests
 // ---------------------------------------------------------------------------
 
-// ensureTypesSentinel writes the types sentinel file so EnsureCustomTypes
-// takes the fast path and doesn't shell out to bd (which is a stub in tests).
+// ensureTypesSentinel writes the types sentinel file and populates the
+// in-memory cache so EnsureCustomTypes/EnsureCustomStatuses skip all bd calls.
+// This is the correct approach for tests using bd stubs that don't implement
+// config get (which the verification step requires).
 func ensureTypesSentinel(t *testing.T, beadsDir string) {
 	t.Helper()
 	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
 	if err := os.WriteFile(filepath.Join(beadsDir, ".gt-types-configured"), []byte(typesList+"\n"), 0644); err != nil {
 		t.Fatalf("write types sentinel: %v", err)
 	}
-	beads.ResetEnsuredDirs()
+	statusesList := strings.Join(constants.BeadsCustomStatusesList(), ",")
+	if err := os.WriteFile(filepath.Join(beadsDir, ".gt-statuses-configured"), []byte(statusesList+"\n"), 0644); err != nil {
+		t.Fatalf("write statuses sentinel: %v", err)
+	}
+	// Mark the real (symlink-resolved) path. On macOS, t.TempDir() returns
+	// /var/folders/... but os.Getwd() (used by workspace.FindFromCwd) returns
+	// /private/var/folders/... — the cache key must match the resolved path.
+	beads.MarkEnsured(beadsDir)
+	if realDir, err := filepath.EvalSymlinks(beadsDir); err == nil && realDir != beadsDir {
+		beads.MarkEnsured(realDir)
+	}
 }
 
 // setupTownWithBdStub creates a minimal town workspace and installs a bd

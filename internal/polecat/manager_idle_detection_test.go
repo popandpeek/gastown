@@ -7,9 +7,10 @@ import (
 )
 
 // TestIdleDetection_ExitTypeRequired verifies that the idle detection logic
-// requires both agent_state=idle AND exit_type present to classify a polecat
-// as idle. This is the fix for the persistent polecat model where tmux
-// sessions stay alive after gt done.
+// requires agent_state=(idle|done) AND exit_type present to classify a polecat
+// as idle-eligible for reuse. Both "idle" and "done" are accepted because
+// gt done sets agent_state=idle directly, but if the state update races or
+// partially fails, the agent may show "done" instead.
 func TestIdleDetection_ExitTypeRequired(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -36,14 +37,38 @@ func TestIdleDetection_ExitTypeRequired(t *testing.T) {
 			wantIdle: true,
 		},
 		{
+			name:     "done with exit_type COMPLETED → idle (done is idle-eligible)",
+			state:    string(beads.AgentStateDone),
+			exitType: "COMPLETED",
+			wantIdle: true,
+		},
+		{
+			name:     "done with exit_type ESCALATED → idle (done is idle-eligible)",
+			state:    string(beads.AgentStateDone),
+			exitType: "ESCALATED",
+			wantIdle: true,
+		},
+		{
 			name:     "idle WITHOUT exit_type → not idle (could be crashed)",
 			state:    string(beads.AgentStateIdle),
 			exitType: "",
 			wantIdle: false,
 		},
 		{
+			name:     "done WITHOUT exit_type → not idle (could be crashed)",
+			state:    string(beads.AgentStateDone),
+			exitType: "",
+			wantIdle: false,
+		},
+		{
 			name:     "working state with exit_type → not idle",
 			state:    string(beads.AgentStateWorking),
+			exitType: "COMPLETED",
+			wantIdle: false,
+		},
+		{
+			name:     "spawning state with exit_type → not idle",
+			state:    string(beads.AgentStateSpawning),
 			exitType: "COMPLETED",
 			wantIdle: false,
 		},
@@ -62,8 +87,9 @@ func TestIdleDetection_ExitTypeRequired(t *testing.T) {
 				ExitType:   tt.exitType,
 			}
 			// This matches the logic in manager.go loadFromBeads:
-			// agent_state=idle AND exit_type present → idle
-			isIdle := beads.AgentState(fields.AgentState) == beads.AgentStateIdle &&
+			// (agent_state=idle OR agent_state=done) AND exit_type present → idle
+			agentState := beads.AgentState(fields.AgentState)
+			isIdle := (agentState == beads.AgentStateIdle || agentState == beads.AgentStateDone) &&
 				fields.ExitType != ""
 
 			if isIdle != tt.wantIdle {
@@ -80,7 +106,8 @@ func TestIdleDetection_NilFields(t *testing.T) {
 	var fields *beads.AgentFields
 	// Matching the guard in loadFromBeads: agentErr == nil && fields != nil && ...
 	isIdle := fields != nil &&
-		beads.AgentState(fields.AgentState) == beads.AgentStateIdle &&
+		(beads.AgentState(fields.AgentState) == beads.AgentStateIdle ||
+			beads.AgentState(fields.AgentState) == beads.AgentStateDone) &&
 		fields.ExitType != ""
 	if isIdle {
 		t.Error("nil fields should not be detected as idle")

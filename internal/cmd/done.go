@@ -948,6 +948,18 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				}
 			}
 
+			// Deterministic status transition: hooked → in_review.
+			// MR creation implies a PR exists (the gt wrapper blocks gt done without one).
+			// This makes the "in review" stage visible on kanban pipeline views.
+			// Status transitions are in Go code, not formulas:
+			//   gt sling → hooked | gt done + MR → in_review | refinery merge → closed
+			if issueID != "" {
+				inReview := "in_review"
+				if _, err := bd.Run("update", issueID, "--status="+inReview); err != nil {
+					style.PrintWarning("could not set %s to in_review: %v", issueID, err)
+				}
+			}
+
 			// Success output
 			fmt.Printf("%s Work submitted to merge queue (verified)\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))

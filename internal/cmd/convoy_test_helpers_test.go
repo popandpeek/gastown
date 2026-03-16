@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
@@ -378,14 +379,20 @@ func (d *testDAG) Setup(t *testing.T) (townRoot, logPath string) {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
-	// Write sentinel files so beads.EnsureCustomTypes/Statuses skip bd calls.
+	// Write sentinel files and populate in-memory cache so
+	// EnsureCustomTypes/EnsureCustomStatuses skip all bd calls.
+	beadsDir := filepath.Join(townRoot, ".beads")
 	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
-	if err := os.WriteFile(filepath.Join(townRoot, ".beads", ".gt-types-configured"), []byte(typesList+"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(beadsDir, ".gt-types-configured"), []byte(typesList+"\n"), 0644); err != nil {
 		t.Fatalf("write types sentinel: %v", err)
 	}
 	statusesList := strings.Join(constants.BeadsCustomStatusesList(), ",")
-	if err := os.WriteFile(filepath.Join(townRoot, ".beads", ".gt-statuses-configured"), []byte(statusesList+"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(beadsDir, ".gt-statuses-configured"), []byte(statusesList+"\n"), 0644); err != nil {
 		t.Fatalf("write statuses sentinel: %v", err)
+	}
+	beads.MarkEnsured(beadsDir)
+	if realDir, err := filepath.EvalSymlinks(beadsDir); err == nil && realDir != beadsDir {
+		beads.MarkEnsured(realDir)
 	}
 
 	// Install bd stub script.
