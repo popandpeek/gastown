@@ -1520,13 +1520,33 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 	// have observed this polecat as idle, but by the time reuse begins the tmux
 	// session may still be alive or may have revived.
 	if running, stale := m.polecatSessionState(name); running {
+		sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
 		if stale {
-			sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
 			if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
 				return nil, fmt.Errorf("killing stale session %s: %w", sessionName, err)
 			}
 		} else {
-			return nil, ErrSessionRunning
+			// Persistent polecat model (gt-4ac): idle polecats keep their tmux
+			// sessions alive for sandbox reuse. Check agent bead state — if the
+			// polecat is idle-eligible (idle/done + exit_type), kill the preserved
+			// session and proceed with reuse. Without this, reuse always fails
+			// for persistent polecats and new ones get spawned instead.
+			agentID := m.agentBeadID(name)
+			_, fields, agentErr := m.beads.GetAgentBead(agentID)
+			if agentErr == nil && fields != nil {
+				agentState := beads.AgentState(fields.AgentState)
+				idleEligible := (agentState == beads.AgentStateIdle || agentState == beads.AgentStateDone) &&
+					fields.ExitType != ""
+				if idleEligible {
+					if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
+						return nil, fmt.Errorf("killing idle session %s for reuse: %w", sessionName, err)
+					}
+				} else {
+					return nil, ErrSessionRunning
+				}
+			} else {
+				return nil, ErrSessionRunning
+			}
 		}
 	}
 
