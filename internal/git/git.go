@@ -1409,6 +1409,13 @@ func (g *Git) StashCount() (int, error) {
 	return count, nil
 }
 
+// StashClear drops all stash entries. Used during polecat reuse to prevent
+// stale stashes from prior work from accumulating.
+func (g *Git) StashClear() error {
+	_, err := g.run("stash", "clear")
+	return err
+}
+
 // UnpushedCommits returns the number of commits that are not pushed to the remote.
 // It checks if the current branch has an upstream and counts commits ahead.
 // Returns 0 if there is no upstream configured.

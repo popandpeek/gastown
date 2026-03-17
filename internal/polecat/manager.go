@@ -1589,6 +1589,8 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 	// state from a previous dog/pool dispatch (uncommitted changes, detached HEAD,
 	// or checked out on an old dog/alpha-* branch).
 	_ = polecatGit.ResetHard("HEAD")
+	// Drop stale stashes from prior work to prevent accumulation.
+	_ = polecatGit.StashClear()
 
 	// Create fresh branch from start point (branch-only, no worktree add/remove)
 	branchName := m.buildBranchName(name, opts.HookBead)
