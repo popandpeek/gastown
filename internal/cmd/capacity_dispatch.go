@@ -350,6 +350,27 @@ func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 		return nil, readyErr
 	}
 
+	// 2b. Supplement with beads whose custom status is "ready".
+	// bd ready only returns beads with built-in status "open". The crew pipeline
+	// uses a custom "ready" status to mark beads as refined and dispatchable.
+	// Without this, beads transitioned to "ready" by crew are invisible to the
+	// scheduler and never dispatch.
+	var scheduledWorkIDs []string
+	for _, ctx := range allContexts {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields != nil && fields.WorkBeadID != "" {
+			scheduledWorkIDs = append(scheduledWorkIDs, fields.WorkBeadID)
+		}
+	}
+	if len(scheduledWorkIDs) > 0 {
+		workBeadInfo := batchFetchBeadInfoByIDs(townRoot, scheduledWorkIDs)
+		for _, id := range scheduledWorkIDs {
+			if info, found := workBeadInfo[id]; found && info.Status == "ready" {
+				readyWorkIDs[id] = true
+			}
+		}
+	}
+
 	// 3. Build PendingBead list — pure filtering, no mutations.
 	// Sort by EnqueuedAt for deterministic deduplication: when concurrent
 	// scheduleBead calls create multiple contexts for the same work bead,

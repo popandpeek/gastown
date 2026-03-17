@@ -512,6 +512,15 @@ func listScheduledBeads(townRoot string) ([]scheduledBeadInfo, error) {
 	readyWorkIDs := listReadyWorkBeadIDs(townRoot)
 	workBeadInfo := batchFetchBeadInfoByIDs(townRoot, workBeadIDs)
 
+	// Supplement readyWorkIDs with beads whose custom status is "ready".
+	// bd ready only returns built-in "open" status; the crew pipeline uses
+	// custom "ready" status for refined, dispatchable beads.
+	for _, id := range workBeadIDs {
+		if info, found := workBeadInfo[id]; found && info.Status == "ready" {
+			readyWorkIDs[id] = true
+		}
+	}
+
 	seenWork := make(map[string]bool)
 	var result []scheduledBeadInfo
 	for _, ctx := range allContexts {
