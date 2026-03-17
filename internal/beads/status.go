@@ -58,6 +58,7 @@ const (
 	StatusInProgress IssueStatus = "in_progress"
 	StatusTombstone  IssueStatus = "tombstone"
 	StatusBlocked    IssueStatus = "blocked"
+	StatusInReview   IssueStatus = "in_review"
 	// StatusPinned and StatusHooked are defined as untyped string constants in
 	// handoff.go. Use IssueStatusPinned/IssueStatusHooked for typed comparisons.
 	IssueStatusPinned IssueStatus = "pinned"
@@ -79,6 +80,13 @@ func (s IssueStatus) IsTerminal() bool {
 	default:
 		return false
 	}
+}
+
+// IsAwaitingMerge returns true if this status indicates work has been submitted
+// to the merge queue. The refinery owns the close transition for these beads;
+// gt done must NOT close them. See be-ri7ix.
+func (s IssueStatus) IsAwaitingMerge() bool {
+	return s == StatusInReview
 }
 
 // IsAssigned returns true if this status indicates the issue is actively

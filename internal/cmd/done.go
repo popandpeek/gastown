@@ -954,8 +954,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// Status transitions are in Go code, not formulas:
 			//   gt sling → hooked | gt done + MR → in_review | refinery merge → closed
 			if issueID != "" {
-				inReview := "in_review"
-				if _, err := bd.Run("update", issueID, "--status="+inReview); err != nil {
+				if _, err := bd.Run("update", issueID, "--status="+string(beads.StatusInReview)); err != nil {
 					style.PrintWarning("could not set %s to in_review: %v", issueID, err)
 				}
 			}
@@ -1346,7 +1345,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		//
 		// DEFERRED exits preserve the bead: work is paused, not done. The bead
 		// stays open/in_progress so it can be resumed on the next session.
-		if hookedBead, err := bd.Show(hookedBeadID); err == nil && !beads.IssueStatus(hookedBead.Status).IsTerminal() {
+		if hookedBead, err := bd.Show(hookedBeadID); err == nil && !beads.IssueStatus(hookedBead.Status).IsTerminal() && !beads.IssueStatus(hookedBead.Status).IsAwaitingMerge() {
 			// Guard: never close a rig identity bead. Polecats dispatched with the
 			// rig bead as their hook (via mol-polecat-work) must not close permanent
 			// infrastructure. Skip close and fall through to idle state update.

@@ -1201,14 +1201,16 @@ func TestHookedBeadCloseNotRestrictedToHookedStatus(t *testing.T) {
 		{"status in_progress → close", "in_progress", true},
 		{"status open → close", "open", true},
 		{"status blocked → close", "blocked", true},
+		{"status in_review → skip (awaiting merge)", "in_review", false},
 		{"status closed → skip (terminal)", "closed", false},
 		{"status tombstone → skip (terminal)", "tombstone", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Replicate the guard condition from updateAgentStateOnDone (gt-pftz fix)
-			shouldClose := !beads.IssueStatus(tt.status).IsTerminal()
+			// Replicate the guard condition from updateAgentStateOnDone (gt-pftz + be-ri7ix fix)
+			s := beads.IssueStatus(tt.status)
+			shouldClose := !s.IsTerminal() && !s.IsAwaitingMerge()
 			if shouldClose != tt.wantClose {
 				t.Errorf("shouldClose for status %q = %v, want %v", tt.status, shouldClose, tt.wantClose)
 			}
