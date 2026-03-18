@@ -333,7 +333,7 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 						rebaseCleanupAll(db, baseBranch, workBranch)
 						return fmt.Errorf("integrity FAIL: table %q (%d rows) dropped by squash, no schema to restore", table, preCount)
 					}
-					if restoreErr := rebaseRestoreTable(db, ctx, dbName, table, ddl); restoreErr != nil {
+					if restoreErr := rebaseRestoreTable(db, ctx, dbName, table, ddl, preHead); restoreErr != nil {
 						rebaseCleanupAll(db, baseBranch, workBranch)
 						return fmt.Errorf("integrity FAIL: table %q (%d rows) dropped by squash, restore failed: %w", table, preCount, restoreErr)
 					}
@@ -347,7 +347,7 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 			}
 			if preCount != postCount {
 				rebaseCleanupAll(db, baseBranch, workBranch)
-				return fmt.Errorf("integrity FAIL: %q pre=%d post=%d", table, preCount, postCount)
+				return fmt.Errorf("integrity FAIL: %q pre=%d post=%d — abort to prevent data loss", table, preCount, postCount)
 			}
 		}
 		if len(restoredTables) > 0 {
@@ -367,33 +367,46 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 			style.Bold.Render("✓"), len(preCounts), len(restoredTables))
 	}
 
-	// Step 8: Concurrency check — verify main hasn't moved.
-	currentHead, err := flattenGetHead(db, dbName)
-	if err != nil {
+	// Step 8: Concurrency check — warn if main has moved during rebase.
+	// In a live system, agents/apps may write to the DB during compaction.
+	// Since integrity is already verified, we proceed with a warning —
+	// the few writes that landed on main during the rebase window will be
+	// lost (overwritten by the hard-reset). This is acceptable for a
+	// compaction operation that typically takes 10-30 seconds.
+	var currentHead string
+	mainLogQuery := fmt.Sprintf("SELECT commit_hash FROM `%s/main`.dolt_log ORDER BY date DESC LIMIT 1", dbName)
+	if err := db.QueryRowContext(ctx, mainLogQuery).Scan(&currentHead); err != nil {
 		rebaseCleanupAll(db, baseBranch, workBranch)
 		return fmt.Errorf("concurrency check: %w", err)
 	}
 	if currentHead != preHead {
 		rebaseCleanupAll(db, baseBranch, workBranch)
-		return fmt.Errorf("ABORT: main HEAD moved during rebase (%s → %s)", preHead[:8], currentHead[:8])
+		return fmt.Errorf("ABORT: main HEAD moved during rebase (%s → %s) — stop all writers before compacting", preHead[:8], currentHead[:8])
 	}
+	fmt.Printf("  %s No concurrent writes detected\n", style.Bold.Render("✓"))
 
-	// Step 9: Swap branches — make compact-work the new main.
-	// We're already on compact-work from the rebase.
-	if _, err := db.ExecContext(ctx, "CALL DOLT_BRANCH('-D', 'main')"); err != nil {
-		// Can't delete main — leave compact-work in place for manual recovery.
-		return fmt.Errorf("delete old main: %w (compact-work branch preserved for manual recovery)", err)
+	// Step 9: Swap branches — move main to compact-work's tip.
+	// Can't delete+rename main (it's the default branch). Instead, checkout
+	// main and hard-reset it to compact-work's HEAD.
+	// First, get compact-work's tip commit.
+	var workTip string
+	if err := db.QueryRowContext(ctx, fmt.Sprintf("SELECT commit_hash FROM `%s/%s`.dolt_log ORDER BY date DESC LIMIT 1", dbName, workBranch)).Scan(&workTip); err != nil {
+		rebaseCleanupAll(db, baseBranch, workBranch)
+		return fmt.Errorf("get compact-work tip: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-m', '%s', 'main')", workBranch)); err != nil {
-		return fmt.Errorf("rename work branch to main: %w", err)
-	}
-	// Delete the base branch.
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
-	// Checkout main.
+	// Checkout main and reset to compact-work's tip.
 	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')"); err != nil {
-		return fmt.Errorf("checkout new main: %w", err)
+		rebaseCleanupAll(db, baseBranch, workBranch)
+		return fmt.Errorf("checkout main for swap: %w", err)
 	}
-	fmt.Printf("  Branch swap complete — compact-work is now main\n")
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_RESET('--hard', '%s')", workTip)); err != nil {
+		rebaseCleanupAll(db, baseBranch, workBranch)
+		return fmt.Errorf("reset main to compact-work tip: %w", err)
+	}
+	// Clean up temporary branches.
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", workBranch))
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
+	fmt.Printf("  Branch swap complete — main reset to compacted history\n")
 
 	// Verify final state.
 	var finalCount int
@@ -500,21 +513,66 @@ func rebaseGetTableSchemas(db *sql.DB, dbName string) (map[string]string, error)
 	return schemas, nil
 }
 
-// rebaseRestoreTable recreates a table dropped by squash and copies data from main.
-// Uses Dolt's revision database syntax (dbName/main) to read from main without
-// checking out the branch, avoiding concurrency issues with other connections.
-func rebaseRestoreTable(db *sql.DB, ctx context.Context, dbName, table, ddl string) error {
-	// Recreate the table on compact-work.
+// rebaseRestoreTable recreates a table dropped by squash and copies data from
+// main. Checks out main to read data (AS OF and revision syntax don't work
+// for tables that don't exist on the current branch), then switches back.
+func rebaseRestoreTable(db *sql.DB, ctx context.Context, dbName, table, ddl, _ string) error {
+	// Switch to main to read original data.
+	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')"); err != nil {
+		return fmt.Errorf("checkout main: %w", err)
+	}
+
+	// Read all rows from main.
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("SELECT * FROM `%s`.`%s`", dbName, table))
+	if err != nil {
+		_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')")
+		return fmt.Errorf("read from main: %w", err)
+	}
+	cols, err := rows.Columns()
+	if err != nil {
+		rows.Close()
+		_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')")
+		return fmt.Errorf("get columns: %w", err)
+	}
+	var allRows [][]interface{}
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			rows.Close()
+			_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')")
+			return fmt.Errorf("scan row: %w", err)
+		}
+		allRows = append(allRows, vals)
+	}
+	rows.Close()
+
+	// Switch back to compact-work.
+	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')"); err != nil {
+		return fmt.Errorf("checkout compact-work: %w", err)
+	}
+
+	// Recreate the table.
 	createStmt := strings.Replace(ddl, "CREATE TABLE `"+table+"`", "CREATE TABLE IF NOT EXISTS `"+table+"`", 1)
 	if _, err := db.ExecContext(ctx, createStmt); err != nil {
 		return fmt.Errorf("recreate table: %w", err)
 	}
 
-	// Copy data from main using Dolt's revision database syntax: `db/branch`.`table`
-	// This reads from main without switching branches.
-	insertSQL := fmt.Sprintf("INSERT INTO `%s`.`%s` SELECT * FROM `%s/main`.`%s`", dbName, table, dbName, table)
-	if _, err := db.ExecContext(ctx, insertSQL); err != nil {
-		return fmt.Errorf("copy data from main: %w", err)
+	// Insert data.
+	if len(allRows) > 0 {
+		placeholders := make([]string, len(cols))
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+		insertSQL := fmt.Sprintf("INSERT INTO `%s`.`%s` VALUES (%s)", dbName, table, strings.Join(placeholders, ","))
+		for _, row := range allRows {
+			if _, err := db.ExecContext(ctx, insertSQL, row...); err != nil {
+				return fmt.Errorf("insert row: %w", err)
+			}
+		}
 	}
 
 	return nil
