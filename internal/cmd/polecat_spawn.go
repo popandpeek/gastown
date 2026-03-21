@@ -178,7 +178,26 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
 	// Idle polecats have completed their work but kept their sandbox (worktree).
 	// Reusing avoids the overhead of creating a new worktree.
+	// Skip idle polecats that have hooked beads waiting — those beads take
+	// priority over new queued work (be-msavh: pipeline revert re-hooks).
 	idlePolecat, findErr := polecatMgr.FindIdlePolecat()
+	if findErr == nil && idlePolecat != nil {
+		// Check if this idle polecat has hooked beads assigned to it
+		polecatIdentity := rigName + "/polecats/" + idlePolecat.Name
+		rigBeads := beads.New(r.Path)
+		hookedBeads, hookErr := rigBeads.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
+			Assignee: polecatIdentity,
+			Priority: -1,
+			Limit:    1,
+		})
+		if hookErr == nil && len(hookedBeads) > 0 {
+			// This polecat has hooked work waiting — don't overwrite it with new work.
+			// The Stop hook or daemon heartbeat will nudge the polecat to pick it up.
+			fmt.Printf("  Skipping idle polecat %s: has hooked bead %s waiting\n", idlePolecat.Name, hookedBeads[0].ID)
+			idlePolecat = nil // Fall through to spawn new polecat
+		}
+	}
 	if findErr == nil && idlePolecat != nil {
 		polecatName := idlePolecat.Name
 		fmt.Printf("Reusing idle polecat: %s\n", polecatName)
