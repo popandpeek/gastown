@@ -943,21 +943,19 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		}
 	}
 
-	// 1. Close source issue with reference to MR.
-	// Use ForceCloseWithReason to bypass dependency checks — the source issue
-	// may have an attached molecule (wisp) whose open steps would block a
-	// normal close. This matches how gt done handles closures.
+	// 1. Set source issue to in_pipeline — the bead is merged to release but
+	// not yet on main. GH Actions will close it after merge-to-main succeeds.
 	if mr.SourceIssue != "" {
-		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
-		if err := e.beads.ForceCloseWithReason(closeReason, mr.SourceIssue); err != nil {
-			// Check if already closed (by polecat's gt done) — that's fine
-			if issue, showErr := e.beads.Show(mr.SourceIssue); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Source issue already closed: %s\n", mr.SourceIssue)
-			} else {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
-			}
+		// Check if already closed (by polecat's gt done) — that's fine
+		if issue, showErr := e.beads.Show(mr.SourceIssue); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Source issue already closed: %s\n", mr.SourceIssue)
 		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
+			status := string(beads.StatusInPipeline)
+			if err := e.beads.Update(mr.SourceIssue, beads.UpdateOptions{Status: &status}); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to set source issue %s to in_pipeline: %v\n", mr.SourceIssue, err)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Set source issue to in_pipeline: %s\n", mr.SourceIssue)
+			}
 		}
 	}
 
