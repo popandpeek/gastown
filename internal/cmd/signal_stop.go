@@ -168,38 +168,47 @@ func checkStopSlungWork(townRoot string) string {
 		return ""
 	}
 
-	// Check agent bead for hook_bead field (preferred, fast path)
+	// Check agent bead for hook_bead field (fast path)
 	b := beads.New(townRoot)
 	agentBead, err := b.Show(agentBeadID)
 	if err == nil && agentBead != nil && agentBead.HookBead != "" {
-		// Agent has hooked work — check if it's actually something new
-		// (vs. work already being processed in this session)
 		hookBead, err := b.Show(agentBead.HookBead)
-		if err == nil && hookBead != nil {
-			// Only block if the hooked work is in "hooked" status (not yet claimed)
-			if hookBead.Status == beads.StatusHooked {
-				return fmt.Sprintf("[gt signal stop] Work slung to you: %s — \"%s\"\n\n"+
-					"Run `gt hook` to see details, then execute the work.",
-					hookBead.ID, hookBead.Title)
-			}
+		if err == nil && hookBead != nil && hookBead.Status == beads.StatusHooked {
+			return fmt.Sprintf("[gt signal stop] Work slung to you: %s — \"%s\"\n\n"+
+				"Run `gt hook` to see details, then execute the work.",
+				hookBead.ID, hookBead.Title)
 		}
-		// Agent bead found with hook — no need for fallback
-		return ""
+		// HookBead is stale or not in hooked status — fall through to query
 	}
 
-	// Fallback: query for any hooked beads assigned to this agent.
-	// This catches cases where the agent bead doesn't exist yet.
+	// Query for any hooked beads assigned to this agent (priority-sorted).
+	// Always runs regardless of HookBead state — catches newly slung beads
+	// that arrived after gt done cleared the previous HookBead (be-msavh).
 	hookedBeads, err := b.List(beads.ListOptions{
 		Status:   beads.StatusHooked,
 		Assignee: identity,
 		Priority: -1,
-		Limit:    1,
+		Limit:    5,
 	})
 	if err == nil && len(hookedBeads) > 0 {
-		bead := hookedBeads[0]
+		// Pick highest priority (lowest number). bd list returns priority-sorted
+		// but we verify by scanning for the minimum.
+		best := hookedBeads[0]
+		for _, hb := range hookedBeads[1:] {
+			if hb.Priority < best.Priority {
+				best = hb
+			}
+		}
+		// Update agent bead's HookBead to the new work for fast-path next time
+		if agentBeadID != "" {
+			_ = b.ClearAgentHookBead(agentBeadID) // Clear first in case of error
+			if updateErr := b.UpdateAgentDescriptionFields(agentBeadID, beads.AgentFieldUpdates{HookBead: &best.ID}); updateErr != nil {
+				// Non-fatal — the block reason is the important part
+			}
+		}
 		return fmt.Sprintf("[gt signal stop] Work slung to you: %s — \"%s\"\n\n"+
 			"Run `gt hook` to see details, then execute the work.",
-			bead.ID, bead.Title)
+			best.ID, best.Title)
 	}
 
 	return ""

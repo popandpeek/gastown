@@ -1396,7 +1396,14 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 	}
 
 doneStateUpdate:
-	// No ClearHookBead call needed — agent bead hook slot is no longer maintained (hq-l6mm5).
+	// Clear HookBead so the Stop hook's fallback query can discover new hooked beads.
+	// Without this, stale HookBead prevents the fallback from running (be-msavh).
+	if agentBeadID != "" {
+		completionBd := beads.New(cwd)
+		if err := completionBd.ClearAgentHookBead(agentBeadID); err != nil {
+			style.PrintWarning("could not clear hook_bead on agent bead: %v", err)
+		}
+	}
 
 	// Purge closed ephemeral beads (wisps) accumulated during this and prior sessions.
 	// Without this, closed wisps from mol-polecat-work steps, mol-witness-patrol cycles,

@@ -448,6 +448,7 @@ func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 // This allows multiple fields to be updated in a single read-modify-write
 // cycle, avoiding races where concurrent callers overwrite each other's changes.
 type AgentFieldUpdates struct {
+	HookBead          *string // Clear/set the hook_bead field
 	CleanupStatus     *string
 	ActiveMR          *string
 	NotificationLevel *string
@@ -489,6 +490,9 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 
 	fields := ParseAgentFields(issue.Description)
 
+	if updates.HookBead != nil {
+		fields.HookBead = *updates.HookBead
+	}
 	if updates.CleanupStatus != nil {
 		fields.CleanupStatus = *updates.CleanupStatus
 	}
@@ -520,6 +524,14 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 
 	description := FormatAgentDescription(issue.Title, fields)
 	return b.Update(id, UpdateOptions{Description: &description})
+}
+
+// ClearAgentHookBead clears the hook_bead field on an agent bead.
+// Called by gt done after setting the work bead to in_review, so the Stop hook's
+// fallback query can discover new hooked beads on the next turn boundary.
+func (b *Beads) ClearAgentHookBead(id string) error {
+	empty := ""
+	return b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{HookBead: &empty})
 }
 
 // UpdateAgentCleanupStatus updates the cleanup_status field in an agent bead.
