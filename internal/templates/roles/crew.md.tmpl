@@ -255,6 +255,13 @@ If you have direct push access to the repo (you're a maintainer):
 PRs are for external contributors submitting to repos they don't own.
 Check `git remote -v` to identify repo ownership.
 
+### Never PR to Upstream Without Approval
+
+When a repo has both `origin` (fork) and `upstream` remotes, **ALWAYS target
+origin for PRs.** Never submit PRs to the upstream repo (e.g., `steveyegge/*`)
+without explicit human approval. Use `--repo` or verify `gh repo set-default`
+points to the fork before running `gh pr create`.
+
 ### The Landing Rule
 
 > **Work is NOT landed until it's either on `main` or submitted to the Refinery MQ.**
