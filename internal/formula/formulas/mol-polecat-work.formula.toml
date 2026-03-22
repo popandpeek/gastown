@@ -147,7 +147,20 @@ git status
 git branch --show-current
 ```
 
-**2. If not on a feature branch, create one:**
+**2. Check for a prior branch from a rejected MR:**
+
+If the bead notes contain "MERGE REJECTION" with a branch name, check if that
+branch still exists on the remote. Reusing it preserves all previous work:
+```bash
+git fetch origin
+# Check for prior branch
+git branch -r | grep <prior-branch>
+# If found, check it out:
+git checkout -b <prior-branch> origin/<prior-branch>
+git rebase origin/{{base_branch}}
+```
+
+**If no prior branch, create a fresh one:**
 ```bash
 git fetch origin
 git checkout -b polecat/<name> origin/{{base_branch}}
@@ -505,9 +518,85 @@ If tests are missing, write them NOW. Do NOT proceed to the next step.
 **Exit criteria:** All quality checks pass, all tests pass, every new file has corresponding tests."""
 
 [[steps]]
+id = "visual-smoke-test"
+title = "Visual smoke test (frontend changes only)"
+needs = ["run-tests"]
+description = """
+**CONDITIONAL**: Only run this step if changes touch `src/` or `server/`.
+
+Check whether this step applies:
+```bash
+CHANGED_FILES=$(git diff --name-only origin/{{base_branch}}...HEAD)
+echo "$CHANGED_FILES" | grep -qE '^(src/|server/)' || { echo "SKIP: No frontend/server changes"; exit 0; }
+```
+
+If no `src/` or `server/` files changed, skip this step entirely and proceed to commit-changes.
+
+**1. Start dev servers:**
+```bash
+# Start backend
+npx tsx server/index.ts &
+SERVER_PID=$!
+
+# Start frontend
+npx vite --port 5173 &
+VITE_PID=$!
+
+# Wait for servers to be ready (max 30s each)
+for i in $(seq 1 30); do curl -s http://localhost:3737/api/sources >/dev/null 2>&1 && break; sleep 1; done
+for i in $(seq 1 30); do curl -s http://localhost:5173/ >/dev/null 2>&1 && break; sleep 1; done
+```
+
+**2. Run visual smoke checks:**
+
+```bash
+BROWSE=~/.claude/skills/gstack/browse/dist/browse
+
+# Check Kanban view loads
+$BROWSE goto http://localhost:5173/kanban
+KANBAN_STATUS=$?
+if [ $KANBAN_STATUS -ne 0 ]; then echo "FAIL: Kanban page failed to load"; fi
+
+# Check List view loads and table renders
+$BROWSE goto http://localhost:5173/list
+LIST_STATUS=$?
+if [ $LIST_STATUS -ne 0 ]; then echo "FAIL: List page failed to load"; fi
+
+# Verify key DOM elements exist
+$BROWSE js "!!document.querySelector('.kanban-view, .pipeline-view, [class*=kanban]')" || true
+$BROWSE js "!!document.querySelector('table, .list-view, [class*=list]')" || true
+
+# Check for console errors (JS exceptions, failed network requests)
+CONSOLE_OUTPUT=$($BROWSE console)
+echo "$CONSOLE_OUTPUT"
+if echo "$CONSOLE_OUTPUT" | grep -qi "error"; then
+  echo "FAIL: Console errors detected"
+  CONSOLE_ERRORS=1
+else
+  CONSOLE_ERRORS=0
+fi
+```
+
+**3. Kill dev servers:**
+```bash
+kill $SERVER_PID $VITE_PID 2>/dev/null || true
+wait $SERVER_PID $VITE_PID 2>/dev/null || true
+```
+
+**4. Evaluate results:**
+
+If ANY check failed (page load failure or console errors):
+- Do NOT proceed. Return to implement step and fix the issue.
+- Common failures: missing imports, broken routes, runtime TypeScript errors.
+
+If all checks passed: proceed to commit-changes.
+
+**Exit criteria:** Kanban and List views load without errors, no console errors detected. Or: step skipped because no src/ or server/ files changed."""
+
+[[steps]]
 id = "commit-changes"
 title = "Commit all implementation changes"
-needs = ["run-tests"]
+needs = ["visual-smoke-test"]
 description = """
 Ensure ALL implementation work is committed before cleanup.
 

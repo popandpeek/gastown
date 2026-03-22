@@ -32,12 +32,6 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 		}
 
 		townRoot := t.TempDir()
-		// Resolve symlinks in TempDir (macOS: /var → /private/var) so path
-		// comparisons match what ResolveBeadsDir returns.
-		townRoot, err := filepath.EvalSymlinks(townRoot)
-		if err != nil {
-			t.Fatal(err)
-		}
 		if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -71,7 +65,7 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 		}
 
 		// ResolveBeadsDir must bridge the gap.
-		// Normalize both paths to handle macOS /var → /private/var symlink.
+		// Normalize both via EvalSymlinks to handle macOS /private/var vs /var differences.
 		resolved := beads.ResolveBeadsDir(result)
 		resolvedReal, _ := filepath.EvalSymlinks(resolved)
 		beadsDirReal, _ := filepath.EvalSymlinks(beadsDir)

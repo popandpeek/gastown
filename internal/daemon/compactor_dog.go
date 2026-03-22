@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -16,9 +17,10 @@ import (
 const (
 	defaultCompactorDogInterval = 24 * time.Hour
 	// defaultCompactorCommitThreshold is the minimum commit count before compaction triggers.
-	// 500 commits is a reasonable daily threshold — prevents unbounded growth
-	// without compacting too aggressively. Configurable via daemon.json.
-	defaultCompactorCommitThreshold = 500
+	// 2000 commits prevents the escalation feedback loop where each compaction
+	// failure creates beads/escalations that add more commits than the compactor
+	// can drain at 500. Configurable via daemon.json.
+	defaultCompactorCommitThreshold = 2000
 	// compactorQueryTimeout is the timeout for individual SQL queries during compaction.
 	compactorQueryTimeout = 30 * time.Second
 	// compactorGCTimeout is the timeout for CALL dolt_gc() after compaction.
@@ -39,7 +41,7 @@ type CompactorDogConfig struct {
 	Enabled     bool     `json:"enabled"`
 	IntervalStr string   `json:"interval,omitempty"`
 	// Threshold is the minimum commit count before compaction triggers.
-	// Defaults to 500 if not set.
+	// Defaults to 2000 if not set.
 	Threshold int `json:"threshold,omitempty"`
 	// Databases lists specific database names to compact.
 	// If empty, falls back to wisp_reaper config, then auto-discovery.
@@ -301,7 +303,9 @@ func (d *Daemon) compactDatabase(dbName string) error {
 	}
 	d.logger.Printf("compactor_dog: %s: committed flattened data", dbName)
 
-	// Step 6: Verify integrity — row counts must match pre-flight.
+	// Step 6: Verify integrity — row counts must not decrease (data loss).
+	// Concurrent writes may increase counts during compaction — this is safe
+	// since the flattened commit includes those rows.
 	postCounts, err := d.compactorGetRowCounts(db, dbName)
 	if err != nil {
 		return fmt.Errorf("post-compact row counts: %w", err)
@@ -312,8 +316,12 @@ func (d *Daemon) compactDatabase(dbName string) error {
 		if !ok {
 			return fmt.Errorf("integrity check: table %q missing after compaction", table)
 		}
-		if preCount != postCount {
-			return fmt.Errorf("integrity check: table %q count mismatch: pre=%d post=%d", table, preCount, postCount)
+		if postCount < preCount {
+			return fmt.Errorf("integrity check: table %q lost rows: pre=%d post=%d", table, preCount, postCount)
+		}
+		if postCount > preCount {
+			d.logger.Printf("compactor_dog: %s: table %q gained %d rows during compaction (concurrent write, safe)",
+				dbName, table, postCount-preCount)
 		}
 	}
 	d.logger.Printf("compactor_dog: %s: integrity verified (%d tables match)", dbName, len(preCounts))
@@ -438,24 +446,18 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	d.logger.Printf("compactor_dog: %s: interactive rebase started", dbName)
 
 	// Step 4: Read rebase plan bounds and mark old commits as squash.
-	// Dolt returns MIN/MAX as decimal strings (e.g. "1.00") via []uint8 byte slices,
-	// which cannot be scanned directly into int or float64. Scan as string, parse, cast.
+	// Dolt returns rebase_order as DECIMAL — the MySQL driver delivers it as
+	// []uint8 (e.g. "1.00") which cannot be scanned directly into int.
 	var minOrderStr, maxOrderStr string
 	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderStr, &maxOrderStr); err != nil {
 		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
 		return fmt.Errorf("read rebase bounds: %w", err)
 	}
-	minOrderF, err := strconv.ParseFloat(minOrderStr, 64)
+	minOrder, maxOrder, err := parseRebaseOrder2(minOrderStr, maxOrderStr)
 	if err != nil {
 		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
-		return fmt.Errorf("parsing min rebase_order %q: %w", minOrderStr, err)
+		return fmt.Errorf("parse rebase bounds: %w", err)
 	}
-	maxOrderF, err := strconv.ParseFloat(maxOrderStr, 64)
-	if err != nil {
-		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
-		return fmt.Errorf("parsing max rebase_order %q: %w", maxOrderStr, err)
-	}
-	minOrder, maxOrder := int(minOrderF), int(maxOrderF)
 
 	squashThreshold := maxOrder - keepRecent
 	if squashThreshold <= minOrder {
@@ -481,7 +483,8 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	}
 	d.logger.Printf("compactor_dog: %s: rebase executed successfully", dbName)
 
-	// Step 6: Verify integrity.
+	// Step 6: Verify integrity — row counts must not decrease (data loss).
+	// Concurrent writes may increase counts during rebase — this is safe.
 	postCounts, err := d.compactorGetRowCounts(db, dbName)
 	if err != nil {
 		d.logger.Printf("compactor_dog: %s: WARNING: could not verify row counts after rebase: %v", dbName, err)
@@ -492,9 +495,13 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 				d.surgicalCleanup(db, baseBranch, workBranch)
 				return fmt.Errorf("integrity: table %q missing after rebase", table)
 			}
-			if preCount != postCount {
+			if postCount < preCount {
 				d.surgicalCleanup(db, baseBranch, workBranch)
-				return fmt.Errorf("integrity: table %q count mismatch: pre=%d post=%d", table, preCount, postCount)
+				return fmt.Errorf("integrity: table %q lost rows: pre=%d post=%d", table, preCount, postCount)
+			}
+			if postCount > preCount {
+				d.logger.Printf("compactor_dog: %s: table %q gained %d rows during rebase (concurrent write, safe)",
+					dbName, table, postCount-preCount)
 			}
 		}
 		d.logger.Printf("compactor_dog: %s: integrity verified (%d tables)", dbName, len(preCounts))
@@ -539,13 +546,28 @@ func (d *Daemon) surgicalCleanup(db *sql.DB, baseBranch, workBranch string) {
 }
 
 // surgicalAbortAndCleanup aborts an in-progress rebase, then cleans up.
-func (d *Daemon) surgicalAbortAndCleanup(db *sql.DB, baseBranch, workBranch string) {
+func (d *Daemon) surgicalAbortAndCleanup(db *sql.DB, baseBranch, workBranch string) { //nolint:unparam // baseBranch is always "compact-base" but kept for API symmetry with surgicalCleanup
 	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
 	defer cancel()
 	_, _ = db.ExecContext(ctx, "CALL DOLT_REBASE('--abort')")
 	_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')")
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", workBranch))
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
+}
+
+// parseRebaseOrder2 parses min/max rebase_order DECIMAL strings to ints.
+// Dolt's dolt_rebase table returns rebase_order as DECIMAL which the MySQL
+// driver delivers as []uint8 (e.g. "1.00"), not directly scannable to int.
+func parseRebaseOrder2(minStr, maxStr string) (int, int, error) {
+	minF, err := strconv.ParseFloat(minStr, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid min rebase_order %q: %w", minStr, err)
+	}
+	maxF, err := strconv.ParseFloat(maxStr, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid max rebase_order %q: %w", maxStr, err)
+	}
+	return int(math.Round(minF)), int(math.Round(maxF)), nil
 }
 
 // surgicalCleanupBase removes only the base branch (work branch not yet created).

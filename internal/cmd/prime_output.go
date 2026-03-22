@@ -11,6 +11,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -90,6 +91,59 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 
 	fmt.Print(output)
 	return output, nil
+}
+
+// outputRoleDirectives loads and emits operator-provided role directives.
+// These come from the directive file layout (town-level and/or rig-level)
+// and override formula defaults where they conflict.
+func outputRoleDirectives(ctx RoleContext) {
+	role := string(ctx.Role)
+	townRoot := ctx.TownRoot
+	rigName := ctx.Rig
+
+	townPath := filepath.Join(townRoot, "directives", role+".md")
+	rigPath := ""
+	if rigName != "" {
+		rigPath = filepath.Join(townRoot, rigName, "directives", role+".md")
+	}
+
+	content := config.LoadRoleDirective(role, townRoot, rigName)
+	if content == "" {
+		explain(true, fmt.Sprintf("Role directives: no directive files found (checked %s", townPath))
+		if rigPath != "" {
+			explain(true, fmt.Sprintf("Role directives: also checked %s", rigPath))
+		}
+		return
+	}
+
+	// Determine source label for the header
+	hasTown := false
+	hasRig := false
+	if data, err := os.ReadFile(townPath); err == nil { //nolint:gosec // G304: path is from trusted config
+		if s := strings.TrimSpace(string(data)); s != "" {
+			hasTown = true
+		}
+	}
+	if rigPath != "" {
+		if data, err := os.ReadFile(rigPath); err == nil { //nolint:gosec // G304: path is from trusted config
+			if s := strings.TrimSpace(string(data)); s != "" {
+				hasRig = true
+			}
+		}
+	}
+
+	explain(true, fmt.Sprintf("Role directives: town=%v rig=%v (town=%s, rig=%s)", hasTown, hasRig, townPath, rigPath))
+
+	fmt.Println()
+	if hasTown && hasRig {
+		fmt.Println("## Town & Rig Directives (operator policy — overrides formula where they conflict)")
+	} else if hasRig {
+		fmt.Println("## Rig Directives (operator policy — overrides formula where they conflict)")
+	} else {
+		fmt.Println("## Town Directives (operator policy — overrides formula where they conflict)")
+	}
+	fmt.Println()
+	fmt.Println(content)
 }
 
 func outputPrimeContextFallback(ctx RoleContext) {
@@ -496,6 +550,22 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("5. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
 		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-deacon-patrol`")
+	case RoleDog:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are a dog with NO WORK on your hook.")
+		fmt.Println()
+		fmt.Println("This likely means dispatch had a timing race (hook write not yet propagated).")
+		fmt.Println("Before going idle, try to recover work:")
+		fmt.Println()
+		fmt.Println("1. Check mail: `" + cli.Name() + " mail inbox` — dispatcher may have sent instructions")
+		fmt.Println("2. If mail has work → execute it")
+		fmt.Println("3. If no mail → check ready queue: `bd ready`")
+		fmt.Println("4. If ready queue has work → claim top bead: `bd update <id> --claim`")
+		fmt.Println("5. If nothing available → run `" + cli.Name() + " done` and exit")
+		fmt.Println()
+		fmt.Println("DO NOT sit idle waiting. Recover or terminate. (GH#2748)")
 	case RoleBoot:
 		fmt.Println()
 		fmt.Println("---")
@@ -572,7 +642,7 @@ func outputAttachmentStatus(ctx RoleContext) {
 
 	// Show inline formula steps if formula name is known, else fall back to bd mol current
 	if attachment.AttachedFormula != "" {
-		showFormulaStepsFull(attachment.AttachedFormula, strings.Split(attachment.FormulaVars, "\n"))
+		showFormulaStepsFull(attachment.AttachedFormula, ctx.TownRoot, ctx.Rig, strings.Split(attachment.FormulaVars, "\n"))
 	} else {
 		showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
 	}

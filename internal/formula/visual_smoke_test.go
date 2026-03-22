@@ -97,12 +97,12 @@ func TestPolecatWorkVisualSmokeTestOrdering(t *testing.T) {
 		return -1
 	}
 
-	buildIdx := indexOf("build-check")
+	testsIdx := indexOf("run-tests")
 	smokeIdx := indexOf("visual-smoke-test")
 	commitIdx := indexOf("commit-changes")
 
-	if buildIdx == -1 {
-		t.Fatal("build-check step not found in topological order")
+	if testsIdx == -1 {
+		t.Fatal("run-tests step not found in topological order")
 	}
 	if smokeIdx == -1 {
 		t.Fatal("visual-smoke-test step not found in topological order")
@@ -111,8 +111,8 @@ func TestPolecatWorkVisualSmokeTestOrdering(t *testing.T) {
 		t.Fatal("commit-changes step not found in topological order")
 	}
 
-	if buildIdx >= smokeIdx {
-		t.Errorf("build-check (idx %d) must come before visual-smoke-test (idx %d)", buildIdx, smokeIdx)
+	if testsIdx >= smokeIdx {
+		t.Errorf("run-tests (idx %d) must come before visual-smoke-test (idx %d)", testsIdx, smokeIdx)
 	}
 	if smokeIdx >= commitIdx {
 		t.Errorf("visual-smoke-test (idx %d) must come before commit-changes (idx %d)", smokeIdx, commitIdx)

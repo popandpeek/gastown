@@ -16,7 +16,6 @@ import (
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // MoleculeCurrentOutput represents the JSON output of bd mol current.
@@ -111,11 +110,11 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 // showFormulaSteps renders the formula steps inline in the prime output.
 // Agents read these steps instead of materializing them as wisp rows.
 // The label parameter customizes the section header (e.g., "Patrol Steps", "Work Steps").
+// townRoot and rigName are used to load formula overlays (operator customizations).
 // extraVars is an optional list of "key=value" overrides that are substituted into
 // step descriptions before rendering, taking precedence over formula defaults.
-func showFormulaSteps(formulaName, label string, extraVars ...[]string) {
+func showFormulaSteps(formulaName, label, townRoot, rigName string, extraVars ...[]string) {
 	// Check disk first (user customizations), fall back to embedded
-	townRoot, _ := workspace.FindFromCwd()
 	content, err := formula.GetFormulaContent(formulaName, townRoot)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
@@ -131,6 +130,9 @@ func showFormulaSteps(formulaName, label string, extraVars ...[]string) {
 	if len(f.Steps) == 0 {
 		return
 	}
+
+	// Apply formula overlays if townRoot is available.
+	applyFormulaOverlays(f, formulaName, townRoot, rigName)
 
 	var vars []string
 	if len(extraVars) > 0 {
@@ -149,10 +151,10 @@ func showFormulaSteps(formulaName, label string, extraVars ...[]string) {
 
 // showFormulaStepsFull renders formula steps with full descriptions.
 // Used for polecat work formulas where step details are the primary instructions.
+// townRoot and rigName are used to load formula overlays (operator customizations).
 // extraVars is an optional list of "key=value" overrides substituted into step descriptions.
-func showFormulaStepsFull(formulaName string, extraVars ...[]string) {
+func showFormulaStepsFull(formulaName, townRoot, rigName string, extraVars ...[]string) {
 	// Check disk first (user customizations), fall back to embedded
-	townRoot, _ := workspace.FindFromCwd()
 	content, err := formula.GetFormulaContent(formulaName, townRoot)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
@@ -168,6 +170,9 @@ func showFormulaStepsFull(formulaName string, extraVars ...[]string) {
 	if len(f.Steps) == 0 {
 		return
 	}
+
+	// Apply formula overlays if townRoot is available.
+	applyFormulaOverlays(f, formulaName, townRoot, rigName)
 
 	var vars []string
 	if len(extraVars) > 0 {
@@ -295,7 +300,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps(constants.MolDeaconPatrol, "Patrol Steps")
+	showFormulaSteps(constants.MolDeaconPatrol, "Patrol Steps", ctx.TownRoot, ctx.Rig)
 }
 
 // outputWitnessPatrolContext shows patrol molecule status for the Witness.
@@ -319,7 +324,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps(constants.MolWitnessPatrol, "Patrol Steps")
+	showFormulaSteps(constants.MolWitnessPatrol, "Patrol Steps", ctx.TownRoot, ctx.Rig)
 }
 
 // outputRefineryPatrolContext shows patrol molecule status for the Refinery.
@@ -344,7 +349,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaStepsFull(constants.MolRefineryPatrol, cfg.ExtraVars)
+	showFormulaStepsFull(constants.MolRefineryPatrol, ctx.TownRoot, ctx.Rig, cfg.ExtraVars)
 }
 
 // buildRefineryPatrolVars loads rig MQ settings and returns --var key=value
@@ -418,4 +423,32 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 		}
 	}
 	return vars
+}
+
+// applyFormulaOverlays loads and applies overlays to a parsed formula.
+// It emits warnings for stale step IDs and, in --explain mode, shows which overlays are active.
+func applyFormulaOverlays(f *formula.Formula, formulaName, townRoot, rigName string) {
+	if townRoot == "" {
+		return
+	}
+
+	overlay, err := formula.LoadFormulaOverlay(formulaName, townRoot, rigName)
+	if err != nil {
+		style.PrintWarning("could not load overlay for %s: %v", formulaName, err)
+		return
+	}
+	if overlay == nil {
+		explain(true, fmt.Sprintf("Formula overlay: no overlay found for %s", formulaName))
+		return
+	}
+
+	explain(true, fmt.Sprintf("Formula overlay: applying %d override(s) for %s (rig=%s)", len(overlay.StepOverrides), formulaName, rigName))
+	for _, so := range overlay.StepOverrides {
+		explain(true, fmt.Sprintf("  overlay: step_id=%s mode=%s", so.StepID, so.Mode))
+	}
+
+	warnings := formula.ApplyOverlays(f, overlay)
+	for _, w := range warnings {
+		style.PrintWarning("formula overlay: %s", w)
+	}
 }
