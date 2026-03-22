@@ -25,7 +25,7 @@ title = "Review implementation"
 
 [[steps]]
 acceptance = "All tests pass, no regressions, test coverage for new code"
-description = "Write and run tests. Unit tests for new code, integration tests if needed, run the full test suite, fix any regressions."
+description = "Write and run tests for all new code. This is a HARD GATE.\n\n1. Run npm run validate (if available) — single source of truth for all quality checks matching CI. Otherwise run the test suite directly.\n\n2. Write tests for every new file: new .ts/.vue files need a .test.ts counterpart, new functions need unit tests (happy + error path), new views need e2e tests, bug fixes need regression tests.\n\n3. Automated enforcement: the coverage gate checks every changed source file has a corresponding test. Excluded: .d.ts, main.ts, router/index.ts, config files.\n\n4. ALL TESTS MUST PASS. Fix failures before proceeding."
 id = "test"
 needs = ["review"]
 title = "Test {{feature}}"
