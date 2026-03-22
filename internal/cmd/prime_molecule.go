@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // MoleculeCurrentOutput represents the JSON output of bd mol current.
@@ -113,7 +114,9 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 // extraVars is an optional list of "key=value" overrides that are substituted into
 // step descriptions before rendering, taking precedence over formula defaults.
 func showFormulaSteps(formulaName, label string, extraVars ...[]string) {
-	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	// Check disk first (user customizations), fall back to embedded
+	townRoot, _ := workspace.FindFromCwd()
+	content, err := formula.GetFormulaContent(formulaName, townRoot)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
 		return
@@ -148,7 +151,9 @@ func showFormulaSteps(formulaName, label string, extraVars ...[]string) {
 // Used for polecat work formulas where step details are the primary instructions.
 // extraVars is an optional list of "key=value" overrides substituted into step descriptions.
 func showFormulaStepsFull(formulaName string, extraVars ...[]string) {
-	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	// Check disk first (user customizations), fall back to embedded
+	townRoot, _ := workspace.FindFromCwd()
+	content, err := formula.GetFormulaContent(formulaName, townRoot)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
 		return

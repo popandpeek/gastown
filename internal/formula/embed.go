@@ -60,6 +60,27 @@ func GetEmbeddedFormulaContent(name string) ([]byte, error) {
 	return content, nil
 }
 
+// GetFormulaContent returns formula content, checking disk first (user customizations),
+// then falling back to the embedded copy. The beadsPath is the workspace root containing
+// .beads/formulas/. If beadsPath is empty, only embedded is checked.
+func GetFormulaContent(name string, beadsPath string) ([]byte, error) {
+	filename := name
+	if !hasFormulaSuffix(filename) {
+		filename = filename + ".formula.toml"
+	}
+
+	// Check disk first — user customizations take priority
+	if beadsPath != "" {
+		diskPath := filepath.Join(beadsPath, ".beads", "formulas", filename)
+		if content, err := os.ReadFile(diskPath); err == nil {
+			return content, nil
+		}
+	}
+
+	// Fall back to embedded
+	return GetEmbeddedFormulaContent(name)
+}
+
 // hasFormulaSuffix checks if a name already has a formula file suffix.
 func hasFormulaSuffix(name string) bool {
 	return len(name) > len(".formula.toml") &&

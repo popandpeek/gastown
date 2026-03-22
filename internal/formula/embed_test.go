@@ -890,3 +890,72 @@ func TestGetEmbeddedFormulaContent(t *testing.T) {
 		t.Error("expected error for non-existent formula")
 	}
 }
+
+func TestGetFormulaContent_DiskPreferred(t *testing.T) {
+	// Create a temp directory with .beads/formulas/ and a custom formula
+	tmpDir := t.TempDir()
+	formulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+	if err := os.MkdirAll(formulasDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	customContent := []byte("description = \"custom disk formula\"\n")
+	if err := os.WriteFile(filepath.Join(formulasDir, "mol-deacon-patrol.formula.toml"), customContent, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// GetFormulaContent with beadsPath should return disk version
+	content, err := GetFormulaContent("mol-deacon-patrol", tmpDir)
+	if err != nil {
+		t.Fatalf("GetFormulaContent error: %v", err)
+	}
+	if string(content) != string(customContent) {
+		t.Errorf("expected disk content, got embedded content")
+	}
+}
+
+func TestGetFormulaContent_FallbackToEmbedded(t *testing.T) {
+	// Empty beadsPath — no disk formulas
+	tmpDir := t.TempDir()
+
+	// Should fall back to embedded
+	content, err := GetFormulaContent("mol-deacon-patrol", tmpDir)
+	if err != nil {
+		t.Fatalf("GetFormulaContent error: %v", err)
+	}
+	if len(content) == 0 {
+		t.Error("expected embedded content, got empty")
+	}
+
+	// Should match embedded content
+	embedded, err := GetEmbeddedFormulaContent("mol-deacon-patrol")
+	if err != nil {
+		t.Fatalf("GetEmbeddedFormulaContent error: %v", err)
+	}
+	if string(content) != string(embedded) {
+		t.Error("fallback content should match embedded content")
+	}
+}
+
+func TestGetFormulaContent_EmptyBeadsPath(t *testing.T) {
+	// Empty string beadsPath — should use embedded only
+	content, err := GetFormulaContent("mol-deacon-patrol", "")
+	if err != nil {
+		t.Fatalf("GetFormulaContent error: %v", err)
+	}
+
+	embedded, err := GetEmbeddedFormulaContent("mol-deacon-patrol")
+	if err != nil {
+		t.Fatalf("GetEmbeddedFormulaContent error: %v", err)
+	}
+	if string(content) != string(embedded) {
+		t.Error("empty beadsPath should return embedded content")
+	}
+}
+
+func TestGetFormulaContent_NonexistentFormula(t *testing.T) {
+	_, err := GetFormulaContent("nonexistent-formula", "")
+	if err == nil {
+		t.Error("expected error for non-existent formula")
+	}
+}
