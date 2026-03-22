@@ -640,6 +640,18 @@ Determine `<merge-target>` using the **Target Resolution Rule** above.
 
 **If merge_strategy = "direct" (default):**
 
+**Step 0.5 (CRITICAL): Wait for CI checks before merging.**
+
+Branch protection requires status checks to pass. Before merging, verify
+the PR's CI checks have passed:
+```bash
+gh pr checks <polecat-branch> --watch --fail-fast
+```
+
+If CI checks FAIL: Do NOT merge. Send FIX_NEEDED back to the polecat
+(same as PR mode failure handling below).
+
+If CI checks PASS: Proceed with merge:
 ```bash
 git checkout <merge-target>
 git merge --ff-only temp

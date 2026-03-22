@@ -427,93 +427,67 @@ needs = ["verify-acceptance"]
 description = """
 Verify your changes don't break anything and are properly tested.
 
-**1. Run quality checks (skip any that are not configured):**
+**1. Run the unified validation target:**
 
-If setup_command is set: `{{setup_command}}`
-If typecheck_command is set: `{{typecheck_command}}`
-If lint_command is set: `{{lint_command}}`
-If build_command is set: `{{build_command}}`
-
+If a `validate` script exists (e.g., `npm run validate`), run it — this is the
+single source of truth for all quality checks, matching what CI runs:
 ```bash
-{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
-{{typecheck_command}}       # Check for type errors (if command set)
-{{lint_command}}            # Check for lint errors (if command set)
-{{build_command}}            # Make sure it builds (if command set)
+npm run validate            # typecheck + lint + test + build + coverage gate + bundle size
 ```
 
-Empty commands mean "not configured for this project" — skip silently.
+If no validate script exists, fall back to individual commands:
+```bash
+{{setup_command}}           # Install dependencies (if configured)
+{{typecheck_command}}       # Type check (if configured)
+{{lint_command}}            # Lint (if configured)
+{{test_command}}            # Tests (if configured)
+{{build_command}}           # Build (if configured)
+```
 
 **2. If typecheck or build fails: you MUST fix it before proceeding.**
 Typecheck and build failures are BLOCKING — do NOT create a PR with type errors.
 This is non-negotiable regardless of whether your change caused the failure.
 
 - If your change caused it: fix it. Return to implement step if needed.
-- If pre-existing on the base branch: fix it anyway. You cannot submit a PR that
-  fails typecheck — CI will reject it, the revert pipeline will revert it, and
-  the bead will be re-dispatched. Fix the type errors in your PR.
+- If pre-existing on the base branch: fix it anyway. CI will reject it,
+  the revert pipeline will revert it, and the bead will be re-dispatched.
 
-```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-# Re-run the failing command(s)
-git checkout -
-git stash pop
-```
+**3. ALL TESTS MUST PASS.** Do not proceed with failures.
 
-**3. Run the full test suite:**
-```bash
-{{test_command}}            # Run tests (configured per-rig)
-```
+If tests fail, determine if your change caused it:
+- If yes: Fix it. Return to implement step if needed.
+- If pre-existing: File a bead, but your PR must still pass.
 
-**ALL TESTS MUST PASS.** Do not proceed with failures.
+**4. Update existing test mocks and fixtures:**
+If you modified models, schemas, or interfaces, update ALL existing mocks
+and fixtures BEFORE running tests. Do NOT assume existing tests pass unchanged.
 
-**4. If tests fail:**
-- Read the failure output carefully
-- Determine if your change caused it:
-  - If yes: Fix it. Return to implement step if needed.
-  - If no (pre-existing): File a bead, but still must pass for your PR
+**5. Verify test coverage for new code (AUTOMATED GATE):**
 
-```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-{{test_command}}
-git checkout -
-git stash pop
-```
-
-**5. Update existing test mocks and fixtures:**
-If you modified any models, schemas, or service interfaces, you MUST update
-existing mocks and fixtures BEFORE running tests:
-```bash
-# Search for test files that reference changed models/interfaces:
-# e.g., grep -r "YourModelName" tests/ --include="*.py" --include="*.ts"
-# Update ALL mocks and fixtures to match the new field names, types, or shapes.
-```
-Do NOT skip this step. Do NOT assume existing tests will pass without changes.
-
-**6. Verify test coverage for new code (HARD GATE — do NOT proceed without tests):**
-
-**REQUIRED:** Write tests for every new function/component/route you created.
-This step BLOCKS — do not proceed to commit without tests passing.
+This is enforced automatically by `npm run validate` (which runs the test
+coverage gate script). But you MUST also write the tests yourself:
 
 | What you added | Required tests |
 |----------------|---------------|
 | New .ts/.vue file | Corresponding .test.ts file |
-| New function/component | Unit tests (happy path AND error path) |
+| New function/component | Unit tests (happy + error path) |
 | New view/route | E2e or integration tests |
-| Bug fix | Regression test proving the fix works |
+| Bug fix | Regression test proving the fix |
 
-**Test file checklist:**
-For each new source file you created, verify a corresponding test file exists:
+Files that do NOT require tests (auto-excluded by coverage gate):
+- Type definitions (.d.ts)
+- Entry points (main.ts, router/index.ts)
+- Config files, constants
+
+**Automated enforcement:** The coverage gate checks that every changed source
+file has a corresponding test file. If tests are missing, the gate fails and
+you cannot proceed.
+
 ```bash
-# List new files in your branch:
+# Verify manually if needed:
 git diff --name-only --diff-filter=A origin/{{base_branch}}...HEAD
-# For each new .ts or .vue file, there MUST be a .test.ts counterpart
+# For each new .ts or .vue file, a .test.ts counterpart MUST exist
 ```
-
-If tests are missing, write them NOW. Do NOT proceed to the next step.
 
 **Exit criteria:** All quality checks pass, all tests pass, every new file has corresponding tests."""
 
