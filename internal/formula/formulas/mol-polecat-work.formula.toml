@@ -5,57 +5,43 @@ This molecule guides a polecat through a complete work assignment. Each step
 has clear entry/exit criteria and specific commands to run. A polecat can
 crash after any step and resume from the last completed step.
 
-## Polecat Contract (Event-Driven Lifecycle)
+## Polecat Contract (Persistent Model, gt-4ac)
 
-You are an event-driven worker. You:
-1. Receive work via your hook (formula checklist + issue)
-2. Work through formula steps in order (shown inline at prime time)
-3. Submit your MR and enter awaiting_verdict state
-4. Refinery processes your MR:
-   - MERGED → you self-clean via `gt done` (gone)
-   - FIX_NEEDED → you read failure, fix code, resubmit (loop)
-5. You only die when refinery confirms merge
+You are a persistent worker with an ephemeral session. You:
+1. Receive work via your hook (pinned molecule + issue)
+2. Work through molecule steps using `bd mol current` / `bd close <step>`
+3. Create a GitHub PR with `gh pr create --base release`
+4. Complete via `gt done` (transition to IDLE)
+5. The scheduler reuses you for the next assignment
 
-**Event-driven:** After submitting your MR, you stay alive waiting for the
-refinery verdict. If the merge fails, you fix the code in-place without
-losing context. Only on MERGED do you self-clean.
+**Persistent model:** When you run `gt done`, you push your work and transition
+to IDLE. Your sandbox is preserved for reuse. The scheduler assigns you new work
+automatically. The Refinery reviews and merges your PR independently.
 
-**Important:** This formula defines the workflow template. Steps are shown inline
-when you run `gt prime` — there are no separate step beads to close. Work through
-the checklist, await the verdict, then run `gt done` when merged.
+**Important:** This formula defines the template. Your molecule already has step
+beads created from it. Use `gt hook` to find your pinned molecule, then `bd show`
+for step details — do NOT read this file directly.
 
-**Speed principle:** You run the full gate suite AFTER rebasing onto the target
-branch (pre-verify step). This enables the refinery to fast-path merge your MR
-in ~5 seconds instead of re-running gates. If pre-verification is skipped or
-stale, the refinery falls through to normal gate execution.
-
-**Lifecycle:**
-```
-spawning → working → mr_submitted → awaiting_verdict
-                                          │
-                          ┌───────────────┴───────────────┐
-                          ▼                               ▼
-                    FIX_NEEDED                          MERGED
-                          │                               │
-                    (fix & resubmit)                  (gt done → gone)
-                          │
-                    awaiting_verdict (loop)
-```
+**You MUST:**
+- Create a GitHub PR before running gt done (gt done will FAIL without one)
 
 **You do NOT:**
-- Push directly to main (Refinery merges from MQ)
+- Run gt done without a PR (it will be rejected)
+- Push directly to main or release (Refinery merges your PR)
 - Close your own issue (Refinery closes after merge)
-- Fix pre-existing failures on main (Refinery owns main health)
+- Wait for merge (you transition to idle after `gt done`)
+- Use `gt mq submit` (deprecated — use `gh pr create` + `gt done` instead)
+- Revert changes on {{base_branch}} that aren't yours (preserve hotfixes)
 
 ## Variables
 
 | Variable | Source | Description |
 |----------|--------|-------------|
 | issue | hook_bead | The issue ID you're assigned to work on |
-| base_branch | sling vars | The base branch to rebase on (default: main) |
+| base_branch | sling vars | The base branch to rebase on (default: release) |
 | setup_command | rig config | Setup/install command (e.g., `pnpm install`). Empty = skip. |
 | typecheck_command | rig config | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
-| test_command | rig config | Test command. Empty = skip. Rig must configure for its language. |
+| test_command | rig config | Test command (default: `go test ./...`) |
 | lint_command | rig config | Lint command (e.g., `eslint .`). Empty = skip. |
 | build_command | rig config | Build command (e.g., `go build ./...`). Empty = skip. |
 
@@ -63,14 +49,15 @@ spawning → working → mr_submitted → awaiting_verdict
 
 | Situation | Action |
 |-----------|--------|
-| Build fails | Fix it. Do not proceed if it won't compile. |
-| FIX_NEEDED from refinery | Read failure details, fix code, resubmit |
+| Tests fail | Fix them. Do not proceed with failures. |
 | Blocked on external | Mail Witness for help, mark yourself stuck |
 | Context filling | Use gt handoff to cycle to fresh session |
-| Unsure what to do | Mail Witness, don't guess |
-| Max fix attempts exceeded | Mail Witness, enter stuck state |"""
+| Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
 version = 10
+
+[compose]
+aspects = ["memory-context"]
 
 [[steps]]
 id = "load-context"
@@ -89,9 +76,11 @@ bd prime                    # Load beads context
 gt hook               # Shows your pinned molecule and hook_bead
 ```
 
-The hook_bead is your assigned issue. Read it carefully:
+The hook_bead is your assigned issue — **{{issue}}** and ONLY **{{issue}}**.
+Do NOT browse other beads, do NOT run `bd list` or `bd ready`.
+Read ONLY your assignment:
 ```bash
-bd show {{issue}}           # Full issue details
+bd show {{issue}}           # Full issue details — THIS is your work
 ```
 
 **3. Check inbox for additional context:**
@@ -100,34 +89,42 @@ gt mail inbox
 # Read any HANDOFF or assignment messages
 ```
 
-**4. Check for prior merge failure context:**
-
-If the bead notes contain "MERGE REJECTION", a previous polecat's work was
-rejected by the refinery. Read the failure details carefully:
-- **Failure-Type**: what broke (tests, build, lint, typecheck)
-- **Error**: the actual error output
-- **Branch**: the previous branch may still exist with the original work
-
-If a prior branch exists, check it out instead of creating a new one:
-```bash
-git fetch origin
-git branch -a | grep <branch-from-notes>
-# If it exists: git checkout <branch> && git rebase origin/{{base_branch}}
-```
-
-This lets you make a targeted fix rather than starting from scratch.
-
-**5. Understand the requirements:**
+**4. Understand the requirements:**
 - What exactly needs to be done?
 - What files are likely involved?
 - Are there dependencies or blockers?
 - What does "done" look like?
-- If this is a rework: what specifically failed and why?
 
-**6. Verify you can proceed:**
+**5. Query CASS memory for prior context (if cm available):**
+```bash
+# Get relevant rules and past solutions for your task
+CM_RESULT=$(cm context "$(bd show {{issue}} --json | jq -r .title)" --json 2>/dev/null) || true
+if [ -n "$CM_RESULT" ]; then
+  echo "$CM_RESULT" | jq -r '.data.relevantBullets[]?.content // empty' | head -5
+  # Persist rule IDs to file so they survive across step boundaries
+  RULE_IDS=$(echo "$CM_RESULT" | jq -r '[.data.relevantBullets[]?.id // empty] | join(",")' 2>/dev/null)
+  echo "$RULE_IDS" > /tmp/cass-rules-{{issue}}.txt
+fi
+```
+Review any surfaced rules — they're lessons from prior sessions that may help.
+
+**6. Set bead status to in_progress:**
+```bash
+bd update {{issue}} --status=in_progress
+```
+This makes active work visible on kanban pipeline views immediately.
+
+**7. Verify you can proceed:**
 - No unresolved blockers on the issue
 - You understand what to do
 - Required resources are available
+
+**CRITICAL — WRONG BEAD GUARD:**
+Your assigned bead is **{{issue}}** and ONLY {{issue}}. Do NOT close, work on,
+or claim completion of ANY other bead. If you see similar work already on main,
+that is a DIFFERENT bead — not yours. You must implement {{issue}} from scratch.
+Never fabricate commit hashes or claim work is "already done" without verifying
+the EXACT bead ID {{issue}} in the commit message.
 
 If blocked or unclear, mail Witness immediately:
 ```bash
@@ -150,26 +147,7 @@ git status
 git branch --show-current
 ```
 
-**2. Check for a prior attempt branch:**
-
-If `{{prior_branch}}` is set, a previous polecat attempted this issue. Reuse
-their work instead of starting from scratch — cherry-pick their commits onto
-your fresh branch:
-```bash
-git fetch origin
-# Create your own fresh branch (isolation guarantee)
-git checkout -b polecat/<name> origin/{{base_branch}}
-
-# If prior_branch is set, cherry-pick prior work:
-# git log origin/{{prior_branch}} --oneline --not origin/{{base_branch}}
-# git cherry-pick <commits>
-# Or if all commits are good:
-# git cherry-pick origin/{{base_branch}}..origin/{{prior_branch}}
-```
-Prior failure reason (if known): {{prior_failure}}
-Fix the issues from the prior attempt rather than reimplementing from scratch.
-
-**If no prior branch, create a fresh one:**
+**2. If not on a feature branch, create one:**
 ```bash
 git fetch origin
 git checkout -b polecat/<name> origin/{{base_branch}}
@@ -200,6 +178,7 @@ git rebase origin/{{base_branch}}      # Get latest, rebase your branch
 
 If rebase conflicts:
 - Resolve them carefully
+- Test after resolution
 - If stuck, mail Witness
 
 **5. Run project setup (if configured):**
@@ -209,48 +188,106 @@ If setup_command is set, run it to install dependencies:
 {{setup_command}}
 ```
 
-This ensures dependencies are installed before you start work.
+This ensures dependencies are installed before pre-flight checks.
 Empty setup_command means "not configured" — skip this step.
 
 **Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed."""
 
 [[steps]]
-id = "implement"
-title = "Implement the solution"
+id = "preflight-tests"
+title = "Verify pre-flights pass on base branch"
 needs = ["branch-setup"]
 description = """
-Do the actual implementation work.
+Check if the codebase is healthy BEFORE starting your work.
+
+**The Scotty Principle:** Don't walk past a broken warp core. But also don't
+let someone else's mess consume your entire mission.
+
+**1. Run pre-flights on {{base_branch}}:**
+
+Your branch was just created from or rebased on `origin/{{base_branch}}` with no
+implementation changes yet — you're already at the base branch state.
+
+Run each configured check, then tests:
+
+If typecheck_command is set: `{{typecheck_command}}`
+If lint_command is set: `{{lint_command}}`
+If test_command is set: `{{test_command}}`
+
+```bash
+{{typecheck_command}}       # Check for type errors (if command set)
+{{lint_command}}            # Check for lint errors (if command set)
+{{test_command}}            # Run tests (if command set)
+```
+
+Empty commands mean "not configured" — skip silently.
+
+**2. If pre-flights pass:**
+
+Continue to implement step.
+
+**3. If pre-flights fail on {{base_branch}}:**
+
+File a bead and proceed. Do NOT fix pre-existing failures yourself — that is
+not your assignment. Your job is to fix the issue on your hook, not {{base_branch}}.
+
+| Situation | Action |
+|-----------|--------|
+| Any pre-existing failure | File bead, proceed with your work |
+
+FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
+You work on YOUR feature branch only. `gt done` handles push/MR.
+
+**File and proceed path:**
+```bash
+bd create --title "Pre-existing failure: <description>" \
+  --type bug --priority 1
+
+gt mail send <rig>/witness -s "NOTICE: {{base_branch}} has failing pre-flights" \
+  -m "Found pre-existing failures on {{base_branch}}.
+Filed: <bead-id>
+Proceeding with my assigned work ({{issue}})."
+```
+
+**Context consideration:**
+If investigating pre-existing failures consumed significant context:
+```bash
+gt handoff -s "Investigated pre-existing failures, ready for assigned work" \
+  -m "Issue: {{issue}}
+Found: <what failed>
+Ready to start: implement step"
+```
+Fresh session continues from implement.
+
+**Exit criteria:** Pre-flights pass on {{base_branch}} (or issue filed), ready to implement."""
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+needs = ["preflight-tests"]
+description = """
+Do the actual implementation work. **Push after every commit.**
 
 **Working principles:**
 - Follow existing codebase conventions
 - Make atomic, focused commits
 - Keep changes scoped to the assigned issue
 - Don't gold-plate or scope-creep
+- When you modify a model, schema, or service interface, find ALL existing test
+  mocks and fixtures that reference changed fields. Update them BEFORE running
+  tests. Do NOT assume existing tests will pass without changes.
 
-**Persist findings as you go (CRITICAL for session survival):**
-Your session can die at any time (context limit, crash, SIGKILL). Code changes
-survive in git, but analysis, findings, and decisions exist only in your context
-window. Persist them to the bead so they survive session death:
-```bash
-# After completing significant analysis or reaching conclusions:
-bd update {{issue}} --notes "Findings so far: <what you discovered>"
-# For detailed reports, use --design:
-bd update {{issue}} --design "<structured findings>"
-```
-Do this BEFORE closing molecule steps, not after. If your session dies between
-persisting and closing, the findings survive. If you close first, they're lost.
-
-**For report-only tasks** (audits, reviews, research): your findings ARE the
-deliverable. There are no code changes to commit. You MUST persist all findings
-to the bead via --notes or --design. Without this, your entire work product is
-lost when the session ends.
-
-**Commit frequently (for code tasks):**
+**Commit and push frequently:**
 ```bash
 # After each logical unit of work:
 git add <files>
 git commit -m "<type>: <description> ({{issue}})"
+git push
 ```
+
+**PUSH RULE (CRITICAL):** Every `git commit` MUST be immediately followed by
+`git push`. A partial implementation on remote is infinitely better than
+complete work lost when your session dies. Never accumulate unpushed commits.
 
 Commit types: feat, fix, refactor, test, docs, chore
 
@@ -263,8 +300,17 @@ bd create --title "Found: <description>" --type bug --priority 2
 
 Do NOT fix unrelated issues in this branch.
 
+**CASS harmful feedback:**
+If a CASS rule led you down the wrong path during implementation, mark it immediately:
+```bash
+cm mark <bulletId> --harmful --reason "description of how it misled"
+```
+Do NOT blindly mark all rules harmful — only rules you explicitly identify as misleading.
+For example: a rule that told you to use a pattern that caused test failures, or a rule
+whose advice contradicts the actual codebase conventions.
+
 **If stuck:**
-Don't spin for more than 15 minutes. Mail Witness:
+Don't spin for more than 15 minutes. Push what you have, then mail Witness:
 ```bash
 gt mail send <rig>/witness -s "HELP: Stuck on implementation" -m "Issue: {{issue}}
 Trying to: <what you're attempting>
@@ -272,24 +318,14 @@ Problem: <what's blocking you>
 Tried: <what you've attempted>"
 ```
 
-**Exit criteria:** Implementation complete. Code tasks: all changes committed. Report tasks: all findings persisted to bead."""
+**Exit criteria:** Implementation complete, all changes committed AND pushed."""
 
 [[steps]]
 id = "self-review"
 title = "Self-review changes"
 needs = ["implement"]
 description = """
-Review your own changes before the build check. Use `/review --branch` for
-structured grading, or do a manual review.
-
-**Option A: Use /review (recommended)**
-```bash
-/review --branch
-```
-This gives you a structured grade (A-F) with CRITICAL/MAJOR/MINOR findings
-and specific fix suggestions. Fix any CRITICAL or MAJOR issues before proceeding.
-
-**Option B: Manual review**
+Review your own changes before running tests.
 
 **1. Review the diff:**
 ```bash
@@ -297,15 +333,18 @@ git diff origin/{{base_branch}}...HEAD     # All changes vs {{base_branch}}
 git log --oneline origin/{{base_branch}}..HEAD  # All commits
 ```
 
-**2. Check for common issues:**
+**2. Check for common issues (CEO review patterns):**
 
 | Category | Look For |
 |----------|----------|
+| Scope | Only files relevant to {{issue}} should appear |
 | Bugs | Off-by-one, null handling, edge cases |
-| Security | Injection, auth bypass, exposed secrets |
+| Security | Injection, auth bypass, exposed secrets, unsanitized input |
+| Wiring | New deps added but not imported, config defined but not loaded |
 | Style | Naming, formatting, code organization |
-| Completeness | Missing error handling, incomplete paths |
-| Cruft | Debug prints, commented code, TODOs |
+| Completeness | Missing error handling, incomplete code paths |
+| Cruft | Debug prints, commented code, TODOs, console.log |
+| Test quality | Weak assertions (assertTrue(true)), over-mocked tests that can't fail |
 
 **3. Fix issues found:**
 Don't just note them - fix them now. Amend or add commits as needed.
@@ -318,147 +357,157 @@ git diff --stat origin/{{base_branch}}...HEAD
 
 If you accidentally modified unrelated files, remove those changes.
 
-**Exit criteria:** Changes are clean, reviewed (Grade B or better if using /review),
-and ready for build check."""
+**Exit criteria:** Changes are clean, reviewed, and ready for testing."""
 
 [[steps]]
-id = "build-check"
-title = "Build and sanity check"
+id = "verify-acceptance"
+title = "Verify implementation meets acceptance criteria"
 needs = ["self-review"]
 description = """
-Verify your changes compile and pass basic sanity checks. The Refinery's
-bisecting merge queue runs the full test suite — your job is to catch
-obvious problems fast so you don't waste the MQ's time.
+**MANDATORY: Verify your work delivers what the bead requires.**
 
-**1. Build and typecheck (REQUIRED — ALL must pass):**
+This step exists because polecats have historically closed beads without
+meeting acceptance criteria. Do NOT skip this step.
 
-Run setup, typecheck, and build. Skip any that are empty (not configured).
-Every non-empty command is a HARD BLOCKER — do not proceed if any fails.
-
+**1. Re-read the bead description:**
 ```bash
-{{setup_command}}
+bd show {{issue}}
 ```
 
+**2. For each requirement in the description, verify your implementation:**
+
+Go through the bead description line by line. For each stated requirement:
+- Check your diff: `git diff origin/{{base_branch}}...HEAD`
+- Confirm the requirement is DELIVERED in your code
+- If you chose a DIFFERENT approach than prescribed, document WHY in your
+  PR description (next steps). A different approach is acceptable IF justified.
+- If a requirement is NOT delivered (e.g., out of scope, cross-rig change),
+  note it explicitly — do NOT silently skip it.
+
+**3. Score each requirement:**
+
+| Requirement | Status |
+|-------------|--------|
+| <requirement 1> | DELIVERED / ALTERNATIVE_APPROACH / NOT_DELIVERED |
+| <requirement 2> | DELIVERED / ALTERNATIVE_APPROACH / NOT_DELIVERED |
+
+**4. If any requirement is NOT_DELIVERED without justification:**
+Go back to the implement step and finish the work.
+
+**5. If you chose an alternative approach:**
+Add a note to the bead explaining why:
 ```bash
-{{typecheck_command}}
+bd update {{issue}} --notes "Alternative approach for <requirement>: <reason>"
 ```
 
-```bash
-{{build_command}}
-```
+**CRITICAL:** Do NOT close a bead or proceed to gt done if the core
+deliverable does not exist in your code. A proxy, stub, or comment
+rename is NOT a delivery.
 
-**A typecheck failure is as serious as a build failure.** Broken types that
-land on release block ALL subsequent PRs from merging. Fix type errors before
-proceeding — do NOT skip typecheck or treat it as optional.
-
-**2. If any gate fails:**
-- Fix it. Return to implement step if needed.
-- Do NOT submit broken code to the merge queue.
-
-**3. Targeted tests (OPTIONAL — run if fast and relevant):**
-
-If you modified or added test files, run those specific tests to catch
-obvious regressions. Do NOT run the full test suite — that's the
-Refinery's job.
-
-If test_command is set:
-```bash
-{{test_command}} --filter "RelevantTests"
-```
-
-If test_command is NOT set, check CLAUDE.md and AGENTS.md for the project's
-test command. Many projects have a "Definition of Done" section with the
-exact command to run.
-
-**4. Lint (OPTIONAL — run if configured and fast):**
-
-If lint_command is set:
-```bash
-{{lint_command}}
-```
-
-**Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit."""
+**Exit criteria:** Every requirement in the bead has a corresponding
+code change, or an explicit documented justification for deviation."""
 
 [[steps]]
-id = "visual-smoke-test"
-title = "Visual smoke test (frontend changes only)"
-needs = ["build-check"]
+id = "run-tests"
+title = "Run quality checks and tests"
+needs = ["verify-acceptance"]
 description = """
-**CONDITIONAL**: Only run this step if changes touch `src/` or `server/`.
+Verify your changes don't break anything and are properly tested.
 
-Check whether this step applies:
-```bash
-CHANGED_FILES=$(git diff --name-only origin/{{base_branch}}...HEAD)
-echo "$CHANGED_FILES" | grep -qE '^(src/|server/)' || { echo "SKIP: No frontend/server changes"; exit 0; }
-```
+**1. Run quality checks (skip any that are not configured):**
 
-If no `src/` or `server/` files changed, skip this step entirely and proceed to commit-changes.
-
-**1. Start dev servers:**
-```bash
-# Start backend
-npx tsx server/index.ts &
-SERVER_PID=$!
-
-# Start frontend
-npx vite --port 5173 &
-VITE_PID=$!
-
-# Wait for servers to be ready (max 30s each)
-for i in $(seq 1 30); do curl -s http://localhost:3737/api/sources >/dev/null 2>&1 && break; sleep 1; done
-for i in $(seq 1 30); do curl -s http://localhost:5173/ >/dev/null 2>&1 && break; sleep 1; done
-```
-
-**2. Run visual smoke checks:**
+If setup_command is set: `{{setup_command}}`
+If typecheck_command is set: `{{typecheck_command}}`
+If lint_command is set: `{{lint_command}}`
+If build_command is set: `{{build_command}}`
 
 ```bash
-BROWSE=~/.claude/skills/gstack/browse/dist/browse
-
-# Check Kanban view loads
-$BROWSE goto http://localhost:5173/kanban
-KANBAN_STATUS=$?
-if [ $KANBAN_STATUS -ne 0 ]; then echo "FAIL: Kanban page failed to load"; fi
-
-# Check List view loads and table renders
-$BROWSE goto http://localhost:5173/list
-LIST_STATUS=$?
-if [ $LIST_STATUS -ne 0 ]; then echo "FAIL: List page failed to load"; fi
-
-# Verify key DOM elements exist
-$BROWSE js "!!document.querySelector('.kanban-view, .pipeline-view, [class*=kanban]')" || true
-$BROWSE js "!!document.querySelector('table, .list-view, [class*=list]')" || true
-
-# Check for console errors (JS exceptions, failed network requests)
-CONSOLE_OUTPUT=$($BROWSE console)
-echo "$CONSOLE_OUTPUT"
-if echo "$CONSOLE_OUTPUT" | grep -qi "error"; then
-  echo "FAIL: Console errors detected"
-  CONSOLE_ERRORS=1
-else
-  CONSOLE_ERRORS=0
-fi
+{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
+{{typecheck_command}}       # Check for type errors (if command set)
+{{lint_command}}            # Check for lint errors (if command set)
+{{build_command}}            # Make sure it builds (if command set)
 ```
 
-**3. Kill dev servers:**
+Empty commands mean "not configured for this project" — skip silently.
+
+**2. If typecheck or build fails: you MUST fix it before proceeding.**
+Typecheck and build failures are BLOCKING — do NOT create a PR with type errors.
+This is non-negotiable regardless of whether your change caused the failure.
+
+- If your change caused it: fix it. Return to implement step if needed.
+- If pre-existing on the base branch: fix it anyway. You cannot submit a PR that
+  fails typecheck — CI will reject it, the revert pipeline will revert it, and
+  the bead will be re-dispatched. Fix the type errors in your PR.
+
 ```bash
-kill $SERVER_PID $VITE_PID 2>/dev/null || true
-wait $SERVER_PID $VITE_PID 2>/dev/null || true
+# Check if failure exists on {{base_branch}}:
+git stash
+git checkout origin/{{base_branch}}
+# Re-run the failing command(s)
+git checkout -
+git stash pop
 ```
 
-**4. Evaluate results:**
+**3. Run the full test suite:**
+```bash
+{{test_command}}            # Run tests (configured per-rig)
+```
 
-If ANY check failed (page load failure or console errors):
-- Do NOT proceed. Return to implement step and fix the issue.
-- Common failures: missing imports, broken routes, runtime TypeScript errors.
+**ALL TESTS MUST PASS.** Do not proceed with failures.
 
-If all checks passed: proceed to commit-changes.
+**4. If tests fail:**
+- Read the failure output carefully
+- Determine if your change caused it:
+  - If yes: Fix it. Return to implement step if needed.
+  - If no (pre-existing): File a bead, but still must pass for your PR
 
-**Exit criteria:** Kanban and List views load without errors, no console errors detected. Or: step skipped because no src/ or server/ files changed."""
+```bash
+# Check if failure exists on {{base_branch}}:
+git stash
+git checkout origin/{{base_branch}}
+{{test_command}}
+git checkout -
+git stash pop
+```
+
+**5. Update existing test mocks and fixtures:**
+If you modified any models, schemas, or service interfaces, you MUST update
+existing mocks and fixtures BEFORE running tests:
+```bash
+# Search for test files that reference changed models/interfaces:
+# e.g., grep -r "YourModelName" tests/ --include="*.py" --include="*.ts"
+# Update ALL mocks and fixtures to match the new field names, types, or shapes.
+```
+Do NOT skip this step. Do NOT assume existing tests will pass without changes.
+
+**6. Verify test coverage for new code (HARD GATE — do NOT proceed without tests):**
+
+**REQUIRED:** Write tests for every new function/component/route you created.
+This step BLOCKS — do not proceed to commit without tests passing.
+
+| What you added | Required tests |
+|----------------|---------------|
+| New .ts/.vue file | Corresponding .test.ts file |
+| New function/component | Unit tests (happy path AND error path) |
+| New view/route | E2e or integration tests |
+| Bug fix | Regression test proving the fix works |
+
+**Test file checklist:**
+For each new source file you created, verify a corresponding test file exists:
+```bash
+# List new files in your branch:
+git diff --name-only --diff-filter=A origin/{{base_branch}}...HEAD
+# For each new .ts or .vue file, there MUST be a .test.ts counterpart
+```
+
+If tests are missing, write them NOW. Do NOT proceed to the next step.
+
+**Exit criteria:** All quality checks pass, all tests pass, every new file has corresponding tests."""
 
 [[steps]]
 id = "commit-changes"
 title = "Commit all implementation changes"
-needs = ["visual-smoke-test"]
+needs = ["run-tests"]
 description = """
 Ensure ALL implementation work is committed before cleanup.
 
@@ -476,267 +525,277 @@ git status
 git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
 ```
 
-**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
+**3. If working tree is already clean, skip.**
 
-**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
-```bash
-git log origin/{{base_branch}}..HEAD --oneline
-```
-
-This MUST show at least 1 commit. If it shows NOTHING:
-- You have NOT completed your implementation. Do NOT close this step.
-- Go back to the implement step and do the work.
-- If the task genuinely requires no code changes (already fixed upstream, etc.),
-  run `gt done --status DEFERRED` and skip remaining steps.
-- Do NOT proceed to cleanup or submit with zero commits.
-
-**5. VERIFY clean working tree:**
+**4. VERIFY:**
 ```bash
 git status
 ```
 Must show "nothing to commit, working tree clean".
 
-**Report-only tasks (audits, reviews, research — no code changes):**
-If your task produced no code changes, verify your findings are persisted to the bead:
-```bash
-bd show {{issue}}    # Check notes/design fields have your findings
-```
-If findings are persisted, proceed to cleanup. `gt done --cleanup-status clean`
-handles the no-commit case for report-only tasks.
-
-**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
-
-[[steps]]
-id = "pre-verify"
-title = "Pre-merge rebase verification"
-needs = ["commit-changes"]
-description = """
-Rebase onto the target branch and run the full gate suite. This enables the
-refinery to fast-path merge your MR without re-running gates (~5s merge
-instead of minutes).
-
-**1. Fetch and rebase onto target:**
-```bash
-git fetch origin {{base_branch}}
-git rebase origin/{{base_branch}}
-```
-
-If rebase conflicts:
-- Resolve them carefully
-- Re-run the build to ensure the resolution is correct
-- If stuck, mail Witness
-
-**2. Run the full gate suite on the rebased result:**
-
-Run ALL configured gates. Every configured gate is MANDATORY — you MUST NOT
-create a PR if any gate fails. These are not suggestions — they are hard blockers.
-
-```bash
-{{setup_command}}
-```
-
-```bash
-{{typecheck_command}}
-```
-
-```bash
-{{build_command}}
-```
-
-```bash
-{{lint_command}}
-```
-
-```bash
-{{test_command}}
-```
-
-Skip any command that is empty (not configured for this project). But every
-non-empty command MUST pass before proceeding. A typecheck failure is just as
-blocking as a test failure — do NOT create a PR with broken types.
-
-**3. If any gate fails after rebase:**
-- Fix the issue, commit, and re-run ALL gates from step 2 (not just the one that failed)
-- Do NOT proceed with --pre-verified if gates failed
-
-**4. If all gates pass:**
-You will use `gt done --pre-verified` in the next step. This tells the refinery
-that you ran the full gate suite on a rebased branch, enabling fast-path merge.
-
-**Note:** If this step takes too long or the gates are not configured for this
-project, you may skip this step and use `gt done` without --pre-verified.
-The refinery will run gates normally (slower but still correct).
-
-**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass."""
-
-[[steps]]
-id = "submit-mr"
-title = "Submit MR and enter awaiting_verdict"
-needs = ["pre-verify"]
-description = """
-Submit your MR to the merge queue but stay alive for the verdict.
-
-**Pre-flight: Verify you have actual work to submit (HARD GATE):**
+**5. Verify you have commits:**
 ```bash
 git log origin/{{base_branch}}..HEAD --oneline
 ```
-This MUST show at least 1 commit. If it shows nothing, do NOT submit.
+If you made changes during implementation, this MUST show at least 1 commit.
 
-**Report-only tasks (no commits — audits, reviews, research):**
-If this is a report-only task with findings persisted to the bead,
-run `gt done --cleanup-status clean` and skip remaining steps.
-
-**Push and submit MR:**
-```bash
-git push origin HEAD
-
-# Submit to merge queue (creates MR bead, does NOT nuke sandbox)
-gt mq submit {{issue}}
-```
-
-Track the MR bead ID from the submit output — you need it for resubmission.
-
-**Enter awaiting_verdict state:**
-After submission, you are in the `awaiting_verdict` state. The refinery will
-process your MR and send you one of:
-- **MERGED**: Your work was merged successfully → proceed to self-clean step
-- **FIX_NEEDED**: Tests/build/lint failed → proceed to await-verdict step
-
-**Exit criteria:** MR submitted to merge queue, polecat in awaiting_verdict state."""
+**Exit criteria:** All changes committed. Working tree clean."""
 
 [[steps]]
-id = "await-verdict"
-title = "Wait for refinery verdict"
-needs = ["submit-mr"]
+id = "cleanup-workspace"
+title = "Clean up workspace"
+needs = ["commit-changes"]
 description = """
-Wait for the refinery to process your MR and send you a verdict.
+Ensure workspace is pristine before handoff.
 
-**Check for verdict signal:**
+**IMPORTANT: Do NOT run `git push`. That is `gt done`'s job (next step).**
+**IMPORTANT: Do NOT discard implementation changes. They must already be committed.**
 
-First check your mail for FIX_NEEDED or MERGED messages:
+**1. Check for untracked files:**
 ```bash
-gt mail inbox
+git status --porcelain
+```
+Should be empty. If not:
+- Add to .gitignore if appropriate
+- Remove if temporary: `rm <file>`
+- Commit if needed: `git add <file> && git commit -m "chore: add <file>"`
+
+**2. Check stash:**
+```bash
+git stash list
+```
+Should be empty. If not:
+- Pop and commit: `git stash pop && git add -A && git commit -m "chore: unstash work ({{issue}})"`
+- Or drop if truly garbage: `git stash drop`
+
+**3. Verify clean state and commits:**
+```bash
+git status                  # Must show "working tree clean"
+git stash list              # Must be empty
+git log origin/{{base_branch}}..HEAD   # Your commits (should show your work)
 ```
 
-If no verdict yet, use await-signal to wait:
-```bash
-gt mol step await-signal --agent-bead <your-agent-bead> \
-  --backoff-base 30s --backoff-mult 2 --backoff-max 5m
-```
+If `git log origin/{{base_branch}}..HEAD` shows nothing but you DID make changes,
+something went wrong. Do NOT proceed — mail Witness for help.
 
-**On MERGED signal:**
-The refinery merged your work successfully. Proceed to self-clean step.
+**Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — `gt done` handles that."""
 
-**On FIX_NEEDED signal:**
-The refinery found failures in your MR. The FIX_NEEDED message contains:
-- Failure-Type: tests, build, lint, typecheck
-- Error: the actual error output
-- Attempt-Number: how many fix attempts so far
+[[steps]]
+id = "prepare-for-review"
+title = "Prepare work for review"
+needs = ["cleanup-workspace"]
+description = """
+Verify work is complete and ready for merge queue.
 
-**Fix procedure (on FIX_NEEDED):**
+**Note:** Do NOT close the issue. The Refinery will close it after successful merge.
+This enables conflict-resolution retries without reopening closed issues.
 
-1. **Read the failure details** from your mail:
-```bash
-gt mail inbox
-# Read the FIX_NEEDED message for failure details
-```
-
-2. **Also check the bead for updated failure notes:**
+**1. Verify the issue shows your work:**
 ```bash
 bd show {{issue}}
+# Status should still be 'in_progress' (you're working on it)
 ```
 
-3. **Fix the code:**
-   - Diagnose the failure based on the error output
-   - Make targeted fixes (don't refactor unrelated code)
-   - Commit your fix:
-     ```bash
-     git add <files>
-     git commit -m "fix: address <failure-type> failure ({{issue}})"
-     ```
-
-4. **Re-run the failing checks locally:**
-   - If failure was tests: run `{{test_command}}`
-   - If failure was build: run `{{build_command}}`
-   - If failure was lint: run `{{lint_command}}`
-   - If failure was typecheck: run `{{typecheck_command}}`
-
-5. **Rebase and push:**
+**2. Add completion notes:**
 ```bash
-git fetch origin {{base_branch}}
-git rebase origin/{{base_branch}}
-git push origin HEAD --force-with-lease
+bd update {{issue}} --notes "Implemented: <brief summary of what was done>"
 ```
 
-6. **Resubmit to merge queue:**
+**3. Sync beads:**
 ```bash
-gt mq submit {{issue}} --resubmit
+bd sync
 ```
 
-7. **Loop back to awaiting_verdict** — wait for the next verdict.
-
-**Max retry limit:** If Attempt-Number >= 3, do NOT keep retrying.
-Instead, escalate:
-```bash
-gt mail send <rig>/witness -s "HELP: Cannot fix merge failure after 3 attempts" \
-  --stdin <<'BODY'
-Issue: {{issue}}
-Failure-Type: <type>
-Error: <error>
-Attempts: 3
-I've tried to fix this failure 3 times and cannot resolve it.
-Please advise or reassign.
-BODY
-```
-
-**If your session is dying (context filling):**
-Use handoff to preserve your state:
-```bash
-gt handoff -s "Awaiting verdict for {{issue}}" -m "MR submitted, waiting for refinery.
-Attempt: <N>
-Last failure: <type if any>"
-```
-
-**Exit criteria:** Received MERGED signal from refinery."""
+**Exit criteria:** Issue updated with completion notes, beads synced."""
 
 [[steps]]
-id = "self-clean"
-title = "Self-clean after merge confirmation"
-needs = ["await-verdict"]
+id = "final-rebase"
+title = "Rebase on latest base branch before submit"
+needs = ["prepare-for-review"]
 description = """
-The refinery confirmed your work was merged. Self-clean and exit.
+Rebase on the latest base branch to catch conflicts BEFORE they reach the Refinery.
+This prevents silent reverts of changes that landed on {{base_branch}} while you worked.
 
-**Verify MERGED signal:**
-Confirm you received a MERGED signal (not just timing out):
+**1. Fetch latest and rebase:**
 ```bash
-gt mail inbox
-# Should show MERGED message for your branch
+git fetch origin
+git rebase origin/{{base_branch}}
+```
+
+**2. If rebase succeeds (no conflicts):**
+Force-push the rebased branch (history changed):
+```bash
+git push -f
+```
+
+**3. If rebase has conflicts:**
+YOU resolve them — you have full context of your work and know what you changed.
+
+**Resolution principle:** For any code outside YOUR assigned issue, **keep the base
+branch version**. Only preserve YOUR changes for lines that are part of {{issue}}.
+The base branch may contain hotfixes from the Mayor or other merged work that
+must not be reverted.
+
+```bash
+# For each conflicted file:
+git status                 # See conflicted files
+# Edit to resolve — favor base branch for code you didn't write
+git add <resolved-file>
+git rebase --continue
+```
+
+After resolution:
+```bash
+{{test_command}}           # Re-run tests to verify resolution
+git push -f
+```
+
+**4. If truly stuck on a conflict:**
+```bash
+git rebase --abort
+gt mail send <rig>/witness -s "HELP: Conflict on final rebase" \
+  -m "Issue: {{issue}}
+Branch: $(git branch --show-current)
+Cannot resolve conflict with origin/{{base_branch}}"
+```
+
+**Exit criteria:** Branch rebased on latest {{base_branch}}, force-pushed."""
+
+[[steps]]
+id = "create-pr"
+title = "MANDATORY: Create GitHub Pull Request"
+needs = ["final-rebase"]
+description = """
+**⚠️ MANDATORY STEP — DO NOT SKIP. gt done WILL FAIL WITHOUT A PR. ⚠️**
+
+Create a GitHub PR for your work. ALL work goes through PR review. There are NO exceptions.
+
+**1. Generate PR title and body:**
+The PR title should follow conventional commit format: `<type>: <description> ({{issue}})`
+
+**2. Create the PR:**
+```bash
+gh pr create \
+  --title "<type>: <description> ({{issue}})" \
+  --body "$(cat <<'EOF'
+## Summary
+<1-3 bullet points describing what was done and why>
+
+## Changes
+<list of key files/areas changed>
+
+## Test plan
+<how this was tested, what passed>
+
+Issue: {{issue}}
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+EOF
+)" \
+  --base {{base_branch}}
+```
+
+**3. Record the PR URL:**
+```bash
+PR_URL=$(gh pr view --json url -q .url)
+echo "PR created: $PR_URL"
+```
+
+The PR URL will be captured by `gt done` and stored on the MR bead for the
+review agent and refinery to reference.
+
+**4. Set bead status to in_review:**
+```bash
+bd update {{issue}} --status=in_review
+```
+
+This makes the PR review stage visible in kanban pipeline views and bead queries.
+
+**IMPORTANT:** Do NOT request reviewers or merge the PR yourself. The Witness
+will trigger a review agent, and the Refinery will merge after approval.
+
+**Exit criteria:** GitHub PR created, URL available, bead status set to in_review."""
+
+[[steps]]
+id = "submit-and-exit"
+title = "Submit work and transition to idle"
+needs = ["create-pr"]
+description = """
+Submit your work and transition to IDLE. The scheduler assigns you new work.
+
+**⚠️ PREREQUISITE: You MUST have created a GitHub PR in the previous step.
+gt done will REJECT your submission if no open PR exists for your branch.
+If you skipped create-pr, go back and create the PR NOW before proceeding. ⚠️**
+
+**Persistent Polecat Model (gt-4ac):**
+Once you run `gt done`, you transition to IDLE. The command:
+1. Validates an open GitHub PR exists (FAILS if missing)
+2. Notifies the Witness your PR is ready for review and merge
+3. Transitions you to IDLE (sandbox preserved for reuse)
+4. The scheduler assigns you new work when available
+
+**Record session outcome for CASS memory (if cm available):**
+
+Determine the outcome BEFORE recording. If you hit repeated errors, escalated,
+or are exiting with failure status, record failure instead of success.
+
+```bash
+# Read persisted rule IDs from load-context step
+RULE_IDS=""
+if [ -f /tmp/cass-rules-{{issue}}.txt ]; then
+  RULE_IDS=$(cat /tmp/cass-rules-{{issue}}.txt)
+fi
+
+# Determine outcome: "success" if work completed cleanly, "failure" if not
+# Set OUTCOME="failure" if: tests failed repeatedly, you escalated,
+# you're exiting with --status=ESCALATED, or work was not deliverable
+OUTCOME="success"
+
+if [ "$OUTCOME" = "success" ]; then
+  # Mark each surfaced rule as helpful (they contributed to success)
+  if [ -n "$RULE_IDS" ]; then
+    IFS=',' read -ra RULE_ARRAY <<< "$RULE_IDS"
+    for rid in "${RULE_ARRAY[@]}"; do
+      [ -n "$rid" ] && cm mark "$rid" --helpful 2>/dev/null || true
+    done
+  fi
+  cm outcome success "$RULE_IDS" --json 2>/dev/null || true
+else
+  # Record failure — do NOT mark all rules harmful automatically.
+  # Only mark specific rules harmful if they actively misled you:
+  # cm mark <bulletId> --harmful --reason "why it misled" 2>/dev/null || true
+  cm outcome failure "$RULE_IDS" --json 2>/dev/null || true
+fi
+
+# Clean up temp file
+rm -f /tmp/cass-rules-{{issue}}.txt
 ```
 
 **Run gt done:**
 ```bash
-# With pre-verification (if you ran gates before submitting):
-gt done --pre-verified
-
-# Without pre-verification:
 gt done
 ```
 
 You should see output like:
 ```
-✓ Work submitted to merge queue
-  MR ID: gt-xxxxx
+✓ PR submitted for review
   Source: polecat/<name>
   Target: {{base_branch}}
   Issue: {{issue}}
-✓ Sandbox nuked
-✓ Session exiting
+  PR: <github-pr-url>
+✓ Sandbox preserved for reuse (persistent polecat)
 ```
 
-**You are GONE after this.** The refinery has already merged your work.
-`gt done` at this point is just cleanup (nuke sandbox, close session).
+**What happens next:**
+- You transition to IDLE, sandbox preserved
+- The scheduler assigns you new work when available
+- Witness triggers a review agent on your PR
+- Review agent approves or requests changes
+- If approved: Refinery approves (`gh pr review --approve`) and merges (`gh pr merge --rebase --delete-branch`)
+- If rejected: A rework polecat is slung to address feedback
+- Refinery sets the work bead to in_pipeline after merge
 
-**Exit criteria:** Sandbox nuked, session exited."""
+**Exit criteria:** Work submitted, polecat transitioned to idle."""
 
 [vars]
 [vars.issue]
@@ -744,8 +803,8 @@ description = "The issue ID assigned to this polecat"
 required = true
 
 [vars.base_branch]
-description = "The base branch to rebase on and compare against (e.g., main, integration/epic-id)"
-default = "main"
+description = "The base branch to rebase on and compare against (e.g., release, integration/epic-id)"
+default = "release"
 
 [vars.setup_command]
 description = "Setup/install command (e.g., pnpm install). Empty = skip."
@@ -757,7 +816,7 @@ default = ""
 
 [vars.test_command]
 description = "Command to run tests (auto-detected from rig settings)"
-default = ""
+default = "go test ./..."
 
 [vars.lint_command]
 description = "Command to run linting. Empty = skip."
@@ -765,12 +824,4 @@ default = ""
 
 [vars.build_command]
 description = "Command to run build. Empty = skip."
-default = ""
-
-[vars.prior_branch]
-description = "Branch from a prior polecat attempt on the same issue. Cherry-pick or diff against this to reuse prior work instead of starting from scratch. Empty = no prior attempt."
-default = ""
-
-[vars.prior_failure]
-description = "Failure reason from the prior attempt (e.g., conflict, tests, build). Empty = unknown or no prior attempt."
 default = ""
