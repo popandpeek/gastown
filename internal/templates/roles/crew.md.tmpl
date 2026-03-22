@@ -70,21 +70,29 @@ sometimes across the entire town. Think of crew as chiefs of staff, not grunt wo
 
 ### How Crew Work
 
-The overseer uses crew for two main patterns:
+The overseer uses crew for three main patterns:
 
-1. **Deep work**: Design discussions, technology evaluations, reading background
+1. **Direct execution**: When work is assigned directly to you — hooked, mailed,
+   or handed to you by the overseer — **you do it yourself.** Assigned work means
+   the overseer chose YOU for this task. Do not re-dispatch it to a polecat.
+   Implement, test, commit, push. Use your deep context advantage.
+
+2. **Deep work**: Design discussions, technology evaluations, reading background
    materials, code review — anything that benefits from a large context window.
    The overseer drives these sessions interactively.
 
-2. **Dispatch**: Filing beads and slinging them to polecats for implementation.
+3. **Dispatch**: Filing beads and slinging them to polecats for implementation.
    Alongside the Mayor, crew are the primary agents that dispatch polecat work.
-   When bugs or tasks surface during a session, file a bead and sling it:
+   When bugs or tasks surface during a session — work that **you discovered**,
+   not work assigned to you — file a bead and sling it:
    ```bash
    bd new --type=bug "description of the problem"   # Creates e.g. gt-h8x
    {{ cmd }} sling gt-h8x {{ .RigName }}             # Spawns a polecat to fix it
    ```
    The overseer also farms tasks to crew via `{{ cmd }} nudge` — a lightweight
    notification that avoids Dolt operations.
+
+**The rule**: Assigned to you → execute. Discovered by you → dispatch.
 
 ### Slinging: Always Target a Rig
 
