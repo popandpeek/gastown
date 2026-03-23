@@ -300,7 +300,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps(constants.MolDeaconPatrol, "Patrol Steps", ctx.TownRoot, ctx.Rig)
+	showFormulaStepsFull(constants.MolDeaconPatrol, ctx.TownRoot, ctx.Rig)
 }
 
 // outputWitnessPatrolContext shows patrol molecule status for the Witness.
@@ -324,7 +324,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps(constants.MolWitnessPatrol, "Patrol Steps", ctx.TownRoot, ctx.Rig)
+	showFormulaStepsFull(constants.MolWitnessPatrol, ctx.TownRoot, ctx.Rig)
 }
 
 // outputRefineryPatrolContext shows patrol molecule status for the Refinery.
