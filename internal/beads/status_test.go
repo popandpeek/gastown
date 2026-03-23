@@ -133,6 +133,8 @@ func TestIssueStatusConstants(t *testing.T) {
 		StatusOpen:        "open",
 		StatusClosed:      "closed",
 		StatusInProgress:  "in_progress",
+		StatusInReview:    "in_review",
+		StatusInPipeline:  "in_pipeline",
 		StatusTombstone:   "tombstone",
 		StatusBlocked:     "blocked",
 		IssueStatusPinned: "pinned",
