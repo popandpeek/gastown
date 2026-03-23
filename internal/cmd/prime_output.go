@@ -426,7 +426,8 @@ func outputContextFile(ctx RoleContext) {
 	fmt.Print(string(data))
 }
 
-// outputHandoffContent reads and displays the pinned handoff bead for the role.
+// outputHandoffContent reads and displays the pinned handoff bead for the role,
+// then closes any hooked handoff mail beads to prevent accumulation.
 func outputHandoffContent(ctx RoleContext) {
 	if ctx.Role == RoleUnknown {
 		return
@@ -441,17 +442,40 @@ func outputHandoffContent(ctx RoleContext) {
 		// Silently skip if beads lookup fails (might not be a beads repo)
 		return
 	}
-	if issue == nil || issue.Description == "" {
-		// No handoff content
+	if issue != nil && issue.Description != "" {
+		// Display handoff content
+		fmt.Println()
+		fmt.Printf("%s\n\n", style.Bold.Render("## 🤝 Handoff from Previous Session"))
+		fmt.Println(issue.Description)
+		fmt.Println()
+		fmt.Println(style.Dim.Render("(Clear with: gt rig reset --handoff)"))
+	}
+
+	// Close any hooked handoff mail beads that were created by sendHandoffMail.
+	// These beads (title: "🤝 HANDOFF: ...") accumulate if not closed after
+	// the new session starts. Best-effort — don't fail prime if this errors.
+	closeHandoffMailBeads(bd, ctx)
+}
+
+// closeHandoffMailBeads closes hooked mail beads with HANDOFF in the title.
+// These are created by sendHandoffMail() on each gt handoff and must be closed
+// by the successor session to prevent unbounded accumulation.
+func closeHandoffMailBeads(bd *beads.Beads, ctx RoleContext) {
+	agentID := buildAgentIdentity(ctx)
+	if agentID == "" {
 		return
 	}
 
-	// Display handoff content
-	fmt.Println()
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🤝 Handoff from Previous Session"))
-	fmt.Println(issue.Description)
-	fmt.Println()
-	fmt.Println(style.Dim.Render("(Clear with: gt rig reset --handoff)"))
+	issues, err := bd.List(beads.ListOptions{Status: beads.StatusHooked, Priority: -1})
+	if err != nil {
+		return
+	}
+
+	for _, issue := range issues {
+		if strings.Contains(issue.Title, "HANDOFF") && issue.Assignee == agentID {
+			_ = bd.CloseWithReason("consumed by successor session", issue.ID)
+		}
+	}
 }
 
 // outputStartupDirective outputs role-specific instructions for the agent.
