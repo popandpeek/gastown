@@ -608,7 +608,30 @@ gh pr view <polecat-branch> --json url,state -q '.url + " " + .state'
 
 If the PR was not created or is in an unexpected state, debug and retry.
 
-⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5 AND 2-3 COMPLETE**
+**Step 1.75 (pr only): WAIT FOR REQUIRED CHECKS AND MERGE (CRITICAL)**
+
+Defense-in-depth: the refinery MUST NOT merge until GitHub confirms all required
+checks have passed. This prevents merging while E2E or other slow checks are still
+running.
+
+```bash
+# Wait for all required status checks to pass (blocks until complete)
+gh pr checks $PR_URL --required --watch --fail-fast
+```
+
+**If checks pass** (exit code 0): Merge the PR.
+
+```bash
+gh pr merge $PR_URL --squash --delete-branch
+```
+
+**If checks fail** (non-zero exit): DO NOT merge. Skip to handle-failures step.
+- Send FIX_NEEDED to the polecat with the failing check details
+- Do NOT send MERGED notification
+- Do NOT close the MR bead
+- Do NOT archive the MERGE_READY mail
+
+⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5, 1.75, AND 2-3 COMPLETE**
 
 **Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
 
@@ -667,6 +690,8 @@ git branch -d temp
 ```
 
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
+- [x] Required GitHub checks passed (if merge_strategy=pr, verified via `gh pr checks --required`)
+- [x] PR merged via `gh pr merge` (if merge_strategy=pr)
 - [x] MERGED mail sent to witness (with PR URL if merge_strategy=pr)
 - [x] Post-merge cleanup completed (MR closed, source issue closed, branch deleted)
 - [x] MERGE_READY mail archived
