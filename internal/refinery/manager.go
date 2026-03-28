@@ -580,16 +580,17 @@ func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*Merg
 
 // PostMergeResult holds the result of a post-merge cleanup operation.
 type PostMergeResult struct {
-	MR                  *MergeRequest
-	MRClosed            bool
-	SourceIssueClosed   bool
-	SourceIssueID       string
-	SourceIssueNotFound bool // true if source issue doesn't exist (already closed or invalid)
+	MR                    *MergeRequest
+	MRClosed              bool
+	SourceIssueDeploying  bool
+	SourceIssueID         string
+	SourceIssueNotFound   bool // true if source issue doesn't exist (already closed or invalid)
 }
 
 // PostMerge performs post-merge cleanup for a successfully merged MR.
-// It closes the MR bead and its source issue. Branch deletion is handled
-// by the caller since the Manager doesn't have git access.
+// It closes the MR bead and sets the source issue to deploying status.
+// The source issue is closed later by the release pipeline via ntfy→deacon→bd close.
+// Branch deletion is handled by the caller since the Manager doesn't have git access.
 func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 	mr, err := m.FindMR(idOrBranch)
 	if err != nil {
@@ -617,23 +618,26 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 		result.MRClosed = true
 	}
 
-	// Close the source issue with reason and --force to bypass dependency checks.
-	// The source issue may have an attached molecule (wisp) whose open steps
-	// would block a normal bd close. ForceCloseWithReason bypasses this,
-	// matching how gt done handles closures for the no-MR path.
+	// Set the source issue to deploying — it's merged to release and awaiting
+	// the release pipeline to merge to main. The pipeline's create-release-tag
+	// job fires an ntfy BEAD_STATUS:closed notification, which the deacon
+	// processes via bd close. Refinery must NOT close the source issue here.
 	if mr.IssueID != "" {
-		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
-		if err := b.ForceCloseWithReason(closeReason, mr.IssueID); err != nil {
-			// Check if already closed (by polecat's gt done) — that's fine
+		deployingStatus := "deploying"
+		if err := b.Update(mr.IssueID, beads.UpdateOptions{
+			Status:    &deployingStatus,
+			AddLabels: []string{"gt:deploying"},
+		}); err != nil {
+			// Check if already closed (by polecat's gt done) or terminal — that's fine
 			if issue, showErr := b.Show(mr.IssueID); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
 				_, _ = fmt.Fprintf(m.output, "  %s source issue already closed: %s\n", style.Dim.Render("○"), mr.IssueID)
-				result.SourceIssueClosed = true
+				result.SourceIssueDeploying = true
 			} else {
-				_, _ = fmt.Fprintf(m.output, "  %s source issue close: %v\n", style.Dim.Render("○"), err)
+				_, _ = fmt.Fprintf(m.output, "  %s source issue update: %v\n", style.Dim.Render("○"), err)
 				result.SourceIssueNotFound = true
 			}
 		} else {
-			result.SourceIssueClosed = true
+			result.SourceIssueDeploying = true
 		}
 	}
 
