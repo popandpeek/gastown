@@ -78,11 +78,34 @@ func TestIssueStatusIsTerminal(t *testing.T) {
 		{StatusOpen, false},
 		{IssueStatusHooked, false},
 		{StatusInProgress, false},
+		{StatusInReview, false},
 		{IssueStatusPinned, false},
 	}
 	for _, tt := range tests {
 		if got := tt.status.IsTerminal(); got != tt.want {
 			t.Errorf("IssueStatus(%q).IsTerminal() = %v, want %v", tt.status, got, tt.want)
+		}
+	}
+}
+
+func TestIssueStatusIsAwaitingMerge(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		status IssueStatus
+		want   bool
+	}{
+		{StatusInReview, true},
+		{StatusOpen, false},
+		{StatusClosed, false},
+		{StatusInProgress, false},
+		{IssueStatusHooked, false},
+		{IssueStatusPinned, false},
+		{StatusTombstone, false},
+		{StatusBlocked, false},
+	}
+	for _, tt := range tests {
+		if got := tt.status.IsAwaitingMerge(); got != tt.want {
+			t.Errorf("IssueStatus(%q).IsAwaitingMerge() = %v, want %v", tt.status, got, tt.want)
 		}
 	}
 }
@@ -133,6 +156,7 @@ func TestIssueStatusConstants(t *testing.T) {
 		StatusOpen:        "open",
 		StatusClosed:      "closed",
 		StatusInProgress:  "in_progress",
+		StatusInReview:    "in_review",
 		StatusTombstone:   "tombstone",
 		StatusBlocked:     "blocked",
 		IssueStatusPinned: "pinned",

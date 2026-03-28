@@ -56,6 +56,7 @@ const (
 	StatusOpen       IssueStatus = "open"
 	StatusClosed     IssueStatus = "closed"
 	StatusInProgress IssueStatus = "in_progress"
+	StatusInReview   IssueStatus = "in_review"
 	StatusTombstone  IssueStatus = "tombstone"
 	StatusBlocked    IssueStatus = "blocked"
 	// StatusPinned and StatusHooked are defined as untyped string constants in
@@ -79,6 +80,13 @@ func (s IssueStatus) IsTerminal() bool {
 	default:
 		return false
 	}
+}
+
+// IsAwaitingMerge returns true if this status indicates the issue has a PR
+// submitted and is waiting for refinery review/merge. Beads in this state
+// must not be closed by gt done — the refinery closes them after merge.
+func (s IssueStatus) IsAwaitingMerge() bool {
+	return s == StatusInReview
 }
 
 // IsAssigned returns true if this status indicates the issue is actively
