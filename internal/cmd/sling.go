@@ -863,6 +863,13 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		if parts := strings.SplitN(targetAgent, "/", 2); len(parts) >= 1 && parts[0] != "" {
 			rigCmdVars := loadRigCommandVars(townRoot, parts[0])
 			slingVars = append(rigCmdVars, slingVars...)
+
+			// Preflight: warn if test_command is empty for a rig with detectable project type.
+			if !force {
+				if err := warnMissingTestCommand(townRoot, parts[0], slingVars); err != nil {
+					return err
+				}
+			}
 		}
 
 		result, err := InstantiateFormulaOnBead(ctx, formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
