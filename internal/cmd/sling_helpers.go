@@ -1145,6 +1145,69 @@ func loadRigCommandVars(townRoot, rig string) []string {
 	return vars
 }
 
+// detectProjectType checks the rig's codebase for language markers.
+// Returns "js", "go", "python", "rust", or "" (unknown).
+func detectProjectType(townRoot, rig string) string {
+	// Check the mayor/rig clone first (always present), then fall back to any crew clone.
+	roots := []string{filepath.Join(townRoot, rig, "mayor", "rig")}
+
+	// Also check crew clones as fallback.
+	crewDir := filepath.Join(townRoot, rig, "crew")
+	if entries, err := os.ReadDir(crewDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && e.Name() != "README.md" {
+				roots = append(roots, filepath.Join(crewDir, e.Name()))
+			}
+		}
+	}
+
+	for _, root := range roots {
+		if _, err := os.Stat(filepath.Join(root, "package.json")); err == nil {
+			return "js"
+		}
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			return "go"
+		}
+		if _, err := os.Stat(filepath.Join(root, "Cargo.toml")); err == nil {
+			return "rust"
+		}
+		if _, err := os.Stat(filepath.Join(root, "pyproject.toml")); err == nil {
+			return "python"
+		}
+		if _, err := os.Stat(filepath.Join(root, "setup.py")); err == nil {
+			return "python"
+		}
+	}
+	return ""
+}
+
+// warnMissingTestCommand checks if test_command is empty for a rig that has
+// a detectable project type. Returns an error if test_command is missing and
+// the rig has testable code, or nil if everything is fine.
+func warnMissingTestCommand(townRoot, rig string, vars []string) error {
+	// Check if test_command is set in the resolved vars.
+	for _, v := range vars {
+		if strings.HasPrefix(v, "test_command=") {
+			val := strings.TrimPrefix(v, "test_command=")
+			if val != "" {
+				return nil // test_command is set, all good.
+			}
+		}
+	}
+
+	// test_command is empty — check if this rig has a detectable project type.
+	projectType := detectProjectType(townRoot, rig)
+	if projectType == "" {
+		return nil // Unknown project type, can't validate.
+	}
+
+	return fmt.Errorf(
+		"%s rig %q has a %s project but test_command is empty — polecats will skip ALL quality gates\n"+
+			"Fix: add test_command to %s/settings/config.json under merge_queue\n"+
+			"Use --force to dispatch anyway (NOT RECOMMENDED)",
+		style.Warning.Render("⚠"), rig, projectType, rig)
+}
+
 // shouldAcceptPermissionWarning checks if the agent emits a bypass-permissions
 // warning on startup that needs to be acknowledged via tmux.
 func shouldAcceptPermissionWarning(agentName string) bool {
