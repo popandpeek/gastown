@@ -25,6 +25,13 @@ branch (pre-verify step). This enables the refinery to fast-path merge your MR
 in ~5 seconds instead of re-running gates. If pre-verification is skipped or
 stale, the refinery falls through to normal gate execution.
 
+**Time budget:** Total time from branch setup to PR should not exceed 15 minutes
+for typical tasks. Do not waste time on redundant validation runs.
+
+**Run-once rule:** Run quality gates exactly ONCE. If all pass, proceed immediately
+to the next step. Do NOT re-run "to confirm" or "just to be safe." A passing run
+is a passing run — move on.
+
 **You do NOT:**
 - Push directly to main (Refinery merges from MQ)
 - Close your own issue (Refinery closes after merge)
@@ -406,7 +413,8 @@ If lint_command is set:
 {{lint_command}}
 ```
 
-**Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit."""
+**Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit.
+Do NOT run the full test suite here — that happens once in the pre-verify step."""
 
 [[steps]]
 id = "pre-verify"
@@ -428,9 +436,10 @@ If rebase conflicts:
 - Re-run the build to ensure the resolution is correct
 - If stuck, mail Witness
 
-**2. Run the full gate suite on the rebased result:**
+**2. Run the full gate suite on the rebased result (ONCE — no re-runs):**
 
-Run ALL configured gates (not just targeted tests — this is the full verification):
+Run ALL configured gates exactly once. If all pass, proceed to step 4 immediately.
+Do NOT re-run "to confirm" or "just to be safe" — a passing run is definitive:
 
 If build_command is set:
 ```bash
@@ -459,14 +468,15 @@ Empty commands mean "not configured" — skip silently.
 - Do NOT proceed with --pre-verified if gates failed
 
 **4. If all gates pass:**
-You will use `gt done --pre-verified` in the next step. This tells the refinery
-that you ran the full gate suite on a rebased branch, enabling fast-path merge.
+Proceed immediately to the next step. Use `gt done --pre-verified` to tell the
+refinery you ran the full gate suite on a rebased branch, enabling fast-path merge.
+Do NOT re-run gates "to confirm" — one passing run is sufficient.
 
 **Note:** If this step takes too long or the gates are not configured for this
 project, you may skip this step and use `gt done` without --pre-verified.
 The refinery will run gates normally (slower but still correct).
 
-**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass."""
+**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass (one run)."""
 
 [[steps]]
 id = "submit-and-exit"
