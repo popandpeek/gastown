@@ -1074,6 +1074,15 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				}
 			}
 
+			// hq-65663: Set source issue to in_review now that MR exists.
+			// This prevents updateAgentStateOnDone from closing it — the
+			// refinery will close it after merge completes.
+			if issueID != "" {
+				if _, setErr := bd.Run("update", issueID, "--status", string(beads.StatusInReview)); setErr != nil {
+					style.PrintWarning("could not set %s to in_review: %v", issueID, setErr)
+				}
+			}
+
 			// Success output
 			fmt.Printf("%s Work submitted to merge queue (verified)\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
@@ -1526,8 +1535,14 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 				}
 			}
 
-			// Acceptance criteria gate: skip close if criteria are unchecked.
-			if unchecked := beads.HasUncheckedCriteria(hookedBead); unchecked > 0 {
+			// hq-65663: Skip close for beads awaiting merge (in_review).
+			// The refinery will close them after merge completes. Without this
+			// guard, gt done clobbers in_review back to closed.
+			if beads.IssueStatus(hookedBead.Status).IsAwaitingMerge() {
+				fmt.Printf("%s Bead %s is %s — skipping close (refinery will close after merge)\n",
+					style.Bold.Render("→"), hookedBeadID, hookedBead.Status)
+			} else if unchecked := beads.HasUncheckedCriteria(hookedBead); unchecked > 0 {
+				// Acceptance criteria gate: skip close if criteria are unchecked.
 				style.PrintWarning("hooked bead %s has %d unchecked acceptance criteria — skipping close", hookedBeadID, unchecked)
 				fmt.Fprintf(os.Stderr, "  The bead will remain open for witness/mayor review.\n")
 			} else if err := bd.Close(hookedBeadID); err != nil {

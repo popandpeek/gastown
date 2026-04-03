@@ -56,6 +56,8 @@ const (
 	StatusOpen       IssueStatus = "open"
 	StatusClosed     IssueStatus = "closed"
 	StatusInProgress IssueStatus = "in_progress"
+	StatusInReview   IssueStatus = "in_review"
+	StatusInPipeline IssueStatus = "in_pipeline"
 	StatusTombstone  IssueStatus = "tombstone"
 	StatusBlocked    IssueStatus = "blocked"
 	// StatusPinned and StatusHooked are defined as untyped string constants in
@@ -79,6 +81,14 @@ func (s IssueStatus) IsTerminal() bool {
 	default:
 		return false
 	}
+}
+
+// IsAwaitingMerge returns true if this status indicates the issue has been
+// submitted to the merge queue and should NOT be closed by gt done. The
+// refinery will close it after merge completes. Without this guard, gt done
+// clobbers in_review back to closed (hq-65663).
+func (s IssueStatus) IsAwaitingMerge() bool {
+	return s == StatusInReview
 }
 
 // IsAssigned returns true if this status indicates the issue is actively
