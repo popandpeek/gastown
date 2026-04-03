@@ -233,8 +233,8 @@ func TestPatrolFormulasUseDynamicBeadResolution(t *testing.T) {
 // includes heartbeat refresh steps to prevent the daemon from killing a
 // healthy Deacon mid-cycle.
 //
-// Without heartbeat refreshes, a patrol cycle that exceeds 15 minutes
-// (HeartbeatVeryStaleThreshold) causes the daemon to consider the Deacon
+// Without heartbeat refreshes, a patrol cycle that exceeds 20 minutes
+// (HeartbeatVeryStaleThreshold = 20m) causes the daemon to consider the Deacon
 // stuck and kill it, even though the Deacon is actively executing steps.
 func TestDeaconPatrolHasHeartbeatSteps(t *testing.T) {
 	content, err := formulasFS.ReadFile("formulas/mol-deacon-patrol.formula.toml")
@@ -277,16 +277,32 @@ func TestDeaconPatrolHasHeartbeatSteps(t *testing.T) {
 
 	// There should be a mid-cycle heartbeat step
 	foundMid := false
+	foundPreAwait := false
 	for _, step := range f.Steps {
 		if step.ID == "heartbeat-mid" {
 			foundMid = true
 			if !strings.Contains(step.Description, "gt deacon heartbeat") {
 				t.Error("heartbeat-mid step must contain \"gt deacon heartbeat\" command")
 			}
-			break
+		}
+		if step.ID == "loop-or-exit" && strings.Contains(step.Description, "pre-await checkpoint") {
+			foundPreAwait = true
+			if !strings.Contains(step.Description, "gt deacon heartbeat") {
+				t.Error("loop-or-exit step must refresh heartbeat before await-signal")
+			}
+			heartbeatPos := strings.Index(step.Description, "gt deacon heartbeat \"pre-await checkpoint\"")
+			awaitPos := strings.Index(step.Description, "gt mol step await-signal")
+			if heartbeatPos == -1 || awaitPos == -1 {
+				t.Error("loop-or-exit step must contain both pre-await heartbeat and await-signal commands")
+			} else if heartbeatPos > awaitPos {
+				t.Error("pre-await heartbeat must appear before await-signal to close the stale-heartbeat window")
+			}
 		}
 	}
 	if !foundMid {
 		t.Error("deacon patrol formula must have a \"heartbeat-mid\" step for mid-cycle refresh")
+	}
+	if !foundPreAwait {
+		t.Error("deacon patrol formula must refresh heartbeat again before await-signal")
 	}
 }

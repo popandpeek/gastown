@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/telemetry"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -69,10 +71,17 @@ func BdSupportsAllowStaleWithEnv(env []string) bool {
 	}
 
 	cmd := exec.Command(bdPath, "--allow-stale", "version") //nolint:gosec // G204: bd is a trusted internal tool
+	util.SetDetachedProcessGroup(cmd)
 	if env != nil {
 		cmd.Env = env
 	}
-	supported := cmd.Run() == nil
+	var combinedOut bytes.Buffer
+	cmd.Stdout = &combinedOut
+	cmd.Stderr = &combinedOut
+	_ = cmd.Run()
+	// bd v0.60+ exits 0 even on unknown flags, printing the error to stderr.
+	// Check output for "unknown flag" to detect lack of support.
+	supported := !strings.Contains(combinedOut.String(), "unknown flag")
 
 	bdAllowStaleMu.Lock()
 	if bdAllowStalePath != bdPath {
@@ -191,6 +200,11 @@ type Issue struct {
 	// Detailed dependency info from show output
 	Dependencies []IssueDep `json:"dependencies,omitempty"`
 	Dependents   []IssueDep `json:"dependents,omitempty"`
+
+	// Arbitrary metadata blob (JSON object). Used for extension points such as
+	// delegation state (delegated_from key) and merge-slot state (holder/waiters).
+	// Populated by both bd show --json and the in-process store path.
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 // HasLabel checks if an issue has a specific label.
@@ -420,6 +434,7 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	// causing prefix mismatches. Use explicit beadsDir if set, otherwise
 	// resolve from working directory.
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+	util.SetDetachedProcessGroup(cmd)
 	cmd.Dir = b.workDir
 
 	cmd.Env = runEnv
@@ -443,6 +458,7 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 		stdout.Reset()
 		stderr.Reset()
 		cmd = exec.Command("bd", retryArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+		util.SetDetachedProcessGroup(cmd)
 		cmd.Dir = b.workDir
 		cmd.Env = runEnv
 		cmd.Env = append(cmd.Env, telemetry.OTELEnvForSubprocess()...)
@@ -480,6 +496,7 @@ func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //noli
 	fullArgs := MaybePrependAllowStaleWithEnv(runEnv, args)
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+	util.SetDetachedProcessGroup(cmd)
 	cmd.Dir = b.workDir
 
 	cmd.Env = runEnv
@@ -563,6 +580,7 @@ func (b *Beads) buildRunEnv() []string {
 		return env
 	}
 	env := stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
+	env = overrideDoltEnvFromBeadsDir(env, b.getResolvedBeadsDir())
 	return translateDoltPort(env)
 }
 
@@ -579,6 +597,7 @@ func (b *Beads) buildRoutingEnv() []string {
 		return env
 	}
 	env := stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
+	env = overrideDoltEnvFromBeadsDir(env, b.getResolvedBeadsDir())
 	return translateDoltPort(env)
 }
 
@@ -643,6 +662,55 @@ func translateDoltPort(env []string) []string {
 		env = append(env, "BEADS_DOLT_SERVER_HOST="+gtHost)
 	}
 	return env
+}
+
+// overrideDoltEnvFromBeadsDir replaces inherited BEADS_DOLT_* values with the
+// authoritative connection data for the selected beads directory when present.
+// This prevents a parent shell's stale Dolt port from routing bd commands to
+// the wrong server when the command explicitly targets another rig's .beads dir.
+func overrideDoltEnvFromBeadsDir(env []string, beadsDir string) []string {
+	port, host := doltConnectionFromBeadsDir(beadsDir)
+	if port != "" {
+		env = stripEnvPrefixes(env, "BEADS_DOLT_PORT=")
+		env = append(env, "BEADS_DOLT_PORT="+port)
+	}
+	if host != "" {
+		env = stripEnvPrefixes(env, "BEADS_DOLT_SERVER_HOST=")
+		env = append(env, "BEADS_DOLT_SERVER_HOST="+host)
+	}
+	return env
+}
+
+// doltConnectionFromBeadsDir reads the preferred Dolt connection info for a
+// beads directory. The per-directory port file is authoritative when present;
+// metadata.json is used as a fallback and to supply the server host.
+func doltConnectionFromBeadsDir(beadsDir string) (port string, host string) {
+	if beadsDir == "" {
+		return "", ""
+	}
+
+	if data, err := os.ReadFile(filepath.Join(beadsDir, "dolt-server.port")); err == nil {
+		port = strings.TrimSpace(string(data))
+	}
+
+	data, err := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
+	if err != nil {
+		return port, ""
+	}
+
+	var meta struct {
+		DoltServerPort int    `json:"dolt_server_port"`
+		DoltServerHost string `json:"dolt_server_host"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return port, ""
+	}
+
+	if port == "" && meta.DoltServerPort > 0 {
+		port = strconv.Itoa(meta.DoltServerPort)
+	}
+	host = strings.TrimSpace(meta.DoltServerHost)
+	return port, host
 }
 
 // stripEnvPrefixes removes entries matching any of the given prefixes from an

@@ -2,31 +2,35 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
 	beadsdk "github.com/steveyegge/beads"
-	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
-	"github.com/steveyegge/gastown/internal/config"
+	agentconfig "github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/doltserver"
+	"github.com/steveyegge/gastown/internal/estop"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
-	"github.com/steveyegge/gastown/internal/estop"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -38,6 +42,7 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Daemon is the town-level background service.
@@ -54,8 +59,8 @@ type Daemon struct {
 	curator       *feed.Curator
 	convoyManager *ConvoyManager
 	beadsStores   map[string]beadsdk.Storage
-	doltServer *DoltServerManager
-	krcPruner  *KRCPruner
+	doltServer    *DoltServerManager
+	krcPruner     *KRCPruner
 
 	// disabledPatrols is loaded from town settings (disabled_patrols field).
 	// Provides a simple way to disable individual patrol dogs without editing
@@ -131,6 +136,10 @@ const (
 	doctorMolCooldown = 5 * time.Minute
 )
 
+const beadsModulePath = "github.com/steveyegge/beads"
+
+var semverPattern = regexp.MustCompile(`v?(\d+\.\d+\.\d+)`)
+
 // New creates a new daemon instance.
 func New(config *Config) (*Daemon, error) {
 	// Ensure daemon directory exists
@@ -162,6 +171,15 @@ func New(config *Config) (*Daemon, error) {
 	t := tmux.NewTmux()
 	if err := t.SetGlobalEnvironment("GT_TOWN_ROOT", config.TownRoot); err != nil {
 		logger.Printf("Warning: failed to set GT_TOWN_ROOT in tmux global env: %v", err)
+	}
+
+	// Clear any agent identity vars that leaked into tmux global env.
+	// Only GT_TOWN_ROOT should be global. Leaked identity vars cause sessions
+	// without their own session-level overrides to inherit a stale identity,
+	// misattributing beads and mail. GH#3006.
+	identityVars := agentconfig.IdentityEnvVars
+	for _, k := range identityVars {
+		_ = t.UnsetGlobalEnvironment(k)
 	}
 
 	// Load patrol config from mayor/daemon.json, ensuring lifecycle defaults
@@ -301,8 +319,20 @@ func New(config *Config) (*Daemon, error) {
 }
 
 // Run starts the daemon main loop.
-func (d *Daemon) Run() error {
-	d.logger.Printf("Daemon starting (PID %d)", os.Getpid())
+func (d *Daemon) Run() (err error) {
+	pid := os.Getpid()
+	d.logger.Printf("Daemon starting (PID %d)", pid)
+	startupComplete := false
+	defer func() {
+		if err == nil {
+			return
+		}
+		if startupComplete {
+			d.logger.Printf("Daemon exiting with error (PID %d): %v", pid, err)
+			return
+		}
+		d.logger.Printf("Daemon startup failed (PID %d): %v", pid, err)
+	}()
 
 	// Acquire exclusive lock to prevent multiple daemons from running.
 	// This prevents the TOCTOU race condition where multiple concurrent starts
@@ -372,14 +402,24 @@ func (d *Daemon) Run() error {
 	// Start convoy manager (event-driven + periodic stranded scan)
 	// Try opening beads stores eagerly; if Dolt isn't ready yet,
 	// pass the opener as a callback for lazy retry on each poll tick.
-	d.beadsStores = d.openBeadsStores()
+	d.beadsStores, err = d.openBeadsStores()
+	if err != nil {
+		return err
+	}
 	isRigParked := func(rigName string) bool {
 		ok, _ := d.isRigOperational(rigName)
 		return !ok
 	}
 	var storeOpener func() map[string]beadsdk.Storage
 	if len(d.beadsStores) == 0 {
-		storeOpener = d.openBeadsStores
+		storeOpener = func() map[string]beadsdk.Storage {
+			stores, err := d.openBeadsStores()
+			if err != nil {
+				d.logger.Printf("Convoy: beads compatibility check failed: %v", err)
+				return nil
+			}
+			return stores
+		}
 	}
 	d.convoyManager = NewConvoyManager(d.config.TownRoot, d.logger.Printf, d.gtPath, 0, d.beadsStores, storeOpener, isRigParked)
 	if err := d.convoyManager.Start(); err != nil {
@@ -554,6 +594,7 @@ func (d *Daemon) Run() error {
 
 	// Initial heartbeat
 	d.heartbeat(state)
+	startupComplete = true
 
 	for {
 		select {
@@ -904,7 +945,6 @@ func (d *Daemon) pourDoctorMolecule(warnings []string) {
 	mol.closeStep("report")
 }
 
-
 // checkAllRigsDolt verifies all rigs are using the Dolt backend.
 func (d *Daemon) checkAllRigsDolt() error {
 	var problems []string
@@ -953,6 +993,175 @@ func readBeadsBackend(beadsDir string) string {
 	}
 
 	return metadata.Backend
+}
+
+type beadsMetadataReader interface {
+	GetMetadata(ctx context.Context, key string) (string, error)
+}
+
+type beadsDBAccessor interface {
+	DB() *sql.DB
+}
+
+// embeddedBeadsVersion returns the semver of the beads module linked into this binary.
+// Empty string means build info did not include a parseable module version.
+func embeddedBeadsVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, dep := range info.Deps {
+		if dep.Path != beadsModulePath {
+			continue
+		}
+		if dep.Replace != nil {
+			if version := normalizeSemver(dep.Replace.Version); version != "" {
+				return version
+			}
+		}
+		return normalizeSemver(dep.Version)
+	}
+	return ""
+}
+
+func normalizeSemver(version string) string {
+	matches := semverPattern.FindStringSubmatch(version)
+	if len(matches) != 2 {
+		return ""
+	}
+	return matches[1]
+}
+
+func checkBeadsStoreCompatibility(ctx context.Context, stores map[string]beadsdk.Storage, binaryBeadsVersion string) error {
+	if len(stores) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(stores))
+	for name := range stores {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var problems []string
+	for _, name := range names {
+		problem := checkSingleBeadsStoreCompatibility(ctx, name, stores[name], binaryBeadsVersion)
+		if problem != "" {
+			problems = append(problems, problem)
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+
+	remediation := "Upgrade or rebuild `gt` against a newer beads release, or switch to a workspace created by a matching release, then retry `gt daemon start`."
+	if binaryBeadsVersion == "" {
+		remediation = "Rebuild `gt` or use a release whose embedded beads version matches this workspace, then retry `gt daemon start`."
+	}
+
+	return fmt.Errorf("daemon startup blocked: incompatible beads workspace / gt binary combination\n\n  %s\n\n%s",
+		strings.Join(problems, "\n  "), remediation)
+}
+
+func checkSingleBeadsStoreCompatibility(ctx context.Context, name string, store beadsdk.Storage, binaryBeadsVersion string) string {
+	if store == nil {
+		return ""
+	}
+
+	label := displayBeadsStoreName(name)
+	var reasons []string
+
+	if workspaceVersion, err := readStoreBDVersion(ctx, store); err != nil {
+		reasons = append(reasons, fmt.Sprintf("cannot read bd_version metadata: %v", err))
+	} else if workspaceVersion != "" && binaryBeadsVersion != "" && deps.CompareVersions(workspaceVersion, binaryBeadsVersion) > 0 {
+		reasons = append(reasons, fmt.Sprintf("workspace bd_version %s is newer than embedded beads %s", workspaceVersion, binaryBeadsVersion))
+	}
+
+	if err := probeStoreEventSchema(ctx, store); err != nil {
+		reasons = append(reasons, fmt.Sprintf("event polling probe failed: %v", err))
+	}
+
+	if len(reasons) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s: %s", label, strings.Join(reasons, "; "))
+}
+
+func readStoreBDVersion(ctx context.Context, store beadsdk.Storage) (string, error) {
+	if metadataStore, ok := store.(beadsMetadataReader); ok {
+		return metadataStore.GetMetadata(ctx, "bd_version")
+	}
+
+	dbAccessor, ok := store.(beadsDBAccessor)
+	if !ok || dbAccessor.DB() == nil {
+		return "", nil
+	}
+
+	var version string
+	err := dbAccessor.DB().QueryRowContext(ctx, "SELECT value FROM metadata WHERE `key` = 'bd_version'").Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
+func probeStoreEventSchema(ctx context.Context, store beadsdk.Storage) error {
+	if dbAccessor, ok := store.(beadsDBAccessor); ok && dbAccessor.DB() != nil {
+		for _, table := range []string{"events", "wisp_events"} {
+			if err := probeEventTable(ctx, dbAccessor.DB(), table); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Fall back to the typed API if the store doesn't expose raw SQL.
+	_, err := store.GetAllEventsSince(ctx, time.Now().Add(24*time.Hour).UTC())
+	return err
+}
+
+func probeEventTable(ctx context.Context, db *sql.DB, table string) error {
+	query := fmt.Sprintf("SELECT id, created_at FROM %s ORDER BY created_at DESC LIMIT 1", table)
+
+	var (
+		id        string
+		createdAt time.Time
+	)
+	err := db.QueryRowContext(ctx, query).Scan(&id, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%s table probe: %w", table, err)
+	}
+	return nil
+}
+
+func displayBeadsStoreName(name string) string {
+	if name == "hq" {
+		return "town-root beads store"
+	}
+	return fmt.Sprintf("rig %q beads store", name)
+}
+
+func closeBeadsStores(logger *log.Logger, stores map[string]beadsdk.Storage) {
+	for name, store := range stores {
+		if store == nil {
+			continue
+		}
+		if err := store.Close(); err != nil {
+			if logger != nil {
+				logger.Printf("Convoy: error closing beads store (%s): %v", name, err)
+			}
+			continue
+		}
+		if logger != nil {
+			logger.Printf("Convoy: closed beads store (%s)", name)
+		}
+	}
 }
 
 // DeaconRole is the role name for the Deacon's handoff bead.
@@ -1179,25 +1388,24 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 
 	// Session exists but heartbeat is stale - Deacon may be stuck.
-	// gt-p7k: Use two-tier response — nudge for stale (5-15 min),
-	// escalate only for very stale (>= 15 min). The previous logic gated on
+	// gt-p7k: Use two-tier response — nudge for stale (5-20 min),
+	// escalate only for very stale (>= 20 min). The previous logic gated on
 	// IsVeryStale() (>= 15 min) then checked age > 10 min, making the
-	// nudge path unreachable (dead code). Now nudge fires for 5-15 min
+	// nudge path unreachable (dead code). Now nudge fires for 5-20 min
 	// staleness, giving the Deacon a chance to respond before killing.
-	// Kill threshold must be > backoff-max (5m) to avoid false positive
+	// Kill threshold must be > backoff-max (15m) to avoid false positive
 	// kills during legitimate await-signal sleep.
 	if hb.IsVeryStale() {
 		// Detection only: stuck-agent-dog plugin handles context-aware restart
 		d.logger.Printf("STUCK DEACON: heartbeat stale for %s, session %s needs restart", age.Round(time.Minute), sessionName)
 	} else {
-		// Stale but not very stale (5-15 min) - nudge to wake up
+		// Stale but not very stale (5-20 min) - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
 		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
 		}
 	}
 }
-
 
 // ensureWitnessesRunning ensures witnesses are running for configured rigs.
 // Called on each heartbeat to maintain witness patrol loops.
@@ -1524,8 +1732,9 @@ func (d *Daemon) killDefaultPrefixGhosts() {
 
 // openBeadsStores opens beads stores for the town (hq) and all known rigs.
 // Returns a map keyed by "hq" for town-level and rig names for per-rig stores.
-// Stores that fail to open are logged and skipped.
-func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
+// Stores that fail to open are logged and skipped. Successfully opened stores
+// are compatibility-checked before being returned to Convoy polling.
+func (d *Daemon) openBeadsStores() (map[string]beadsdk.Storage, error) {
 	stores := make(map[string]beadsdk.Storage)
 
 	// Town-level store (hq)
@@ -1552,7 +1761,12 @@ func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
 
 	if len(stores) == 0 {
 		d.logger.Printf("Convoy: no beads stores available, event polling disabled")
-		return nil
+		return nil, nil
+	}
+
+	if err := checkBeadsStoreCompatibility(d.ctx, stores, embeddedBeadsVersion()); err != nil {
+		closeBeadsStores(d.logger, stores)
+		return nil, err
 	}
 
 	names := make([]string, 0, len(stores))
@@ -1560,7 +1774,7 @@ func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
 		names = append(names, name)
 	}
 	d.logger.Printf("Convoy: opened %d beads store(s): %v", len(stores), names)
-	return stores
+	return stores, nil
 }
 
 // getKnownRigs returns list of registered rig names.
@@ -1639,16 +1853,16 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	// Check rig bead labels (global/synced docked status)
 	// This is the persistent docked state set by 'gt rig dock'
 	rigPath := filepath.Join(d.config.TownRoot, rigName)
-	
+
 	// Try to get prefix from rig config.json, fall back to rigs.json registry
 	var prefix string
 	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.Beads != nil {
 		prefix = rigCfg.Beads.Prefix
 	} else {
 		// Fall back to registry (mayor/rigs.json) when config.json is missing
-		prefix = config.GetRigPrefix(d.config.TownRoot, rigName)
+		prefix = agentconfig.GetRigPrefix(d.config.TownRoot, rigName)
 	}
-	
+
 	rigBeadID := fmt.Sprintf("%s-rig-%s", prefix, rigName)
 	rigBeadsDir := beads.ResolveBeadsDir(rigPath)
 	bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
@@ -1904,18 +2118,18 @@ func StopDaemon(townRoot string) error {
 		return fmt.Errorf("finding process: %w", err)
 	}
 
-	// Send SIGTERM for graceful shutdown
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("sending SIGTERM: %w", err)
+	// Send termination signal for graceful shutdown
+	if err := sendTermSignal(process); err != nil {
+		return fmt.Errorf("sending termination signal: %w", err)
 	}
 
 	// Wait a bit for graceful shutdown
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	// Check if still running
-	if err := process.Signal(syscall.Signal(0)); err == nil {
+	if isProcessAlive(process) {
 		// Still running, force kill
-		_ = process.Signal(syscall.SIGKILL)
+		_ = sendKillSignal(process)
 	}
 
 	// Clean up PID file
@@ -1965,7 +2179,7 @@ func FindOrphanedDaemons(townRoot string) ([]int, error) {
 	if findErr != nil {
 		return nil, nil
 	}
-	if process.Signal(syscall.Signal(0)) != nil {
+	if !isProcessAlive(process) {
 		// PID file exists but process is dead — stale PID file with held lock.
 		// This shouldn't happen (lock should release on process death), but
 		// report the stale PID for cleanup.
@@ -1991,8 +2205,8 @@ func KillOrphanedDaemons(townRoot string) (int, error) {
 			continue
 		}
 
-		// Try SIGTERM first
-		if err := process.Signal(syscall.SIGTERM); err != nil {
+		// Try termination signal first
+		if err := sendTermSignal(process); err != nil {
 			continue
 		}
 
@@ -2000,9 +2214,9 @@ func KillOrphanedDaemons(townRoot string) (int, error) {
 		time.Sleep(200 * time.Millisecond)
 
 		// Check if still alive
-		if err := process.Signal(syscall.Signal(0)); err == nil {
+		if isProcessAlive(process) {
 			// Still alive, force kill
-			_ = process.Signal(syscall.SIGKILL)
+			_ = sendKillSignal(process)
 		}
 
 		killed++
@@ -2228,6 +2442,7 @@ func (d *Daemon) emitMassDeathEvent() {
 // of crash detection rather than silently suppressing alerts.
 func (d *Daemon) isBeadClosed(beadID string) bool {
 	cmd := exec.Command(d.bdPath, "show", beadID, "--json") //nolint:gosec // G204: args are constructed internally
+	setSysProcAttr(cmd)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ()
 
@@ -2282,8 +2497,9 @@ Restart deferred to stuck-agent-dog plugin for context-aware recovery.`,
 		polecatName, hookBead)
 
 	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
+	setSysProcAttr(cmd)
 	cmd.Dir = d.config.TownRoot
-	cmd.Env = append(os.Environ(), "BD_ACTOR=daemon") // Identify as daemon, not overseer
+	cmd.Env = append(os.Environ(), "BD_ACTOR=daemon")// Identify as daemon, not overseer
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
 	}
@@ -2495,6 +2711,7 @@ func (d *Daemon) dispatchQueuedWork() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gt", "scheduler", "run")
+	setSysProcAttr(cmd)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = append(os.Environ(), "GT_DAEMON=1", "BD_DOLT_AUTO_COMMIT=off")
 	out, err := cmd.CombinedOutput()

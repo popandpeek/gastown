@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"runtime/debug"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // These variables are set at build time via ldflags in cmd package.
@@ -83,6 +85,7 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 	// Get repo HEAD
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = repoDir
+	util.SetDetachedProcessGroup(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		info.Error = fmt.Errorf("cannot get repo HEAD: %w", err)
@@ -90,12 +93,14 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 	}
 	info.RepoCommit = strings.TrimSpace(string(output))
 
-	// Check which branch the repo is on
+	// Check which branch the repo is on.
+	// Accept main/master (upstream) and carry/* (fork operational branches).
 	branchCmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
 	branchCmd.Dir = repoDir
+	util.SetDetachedProcessGroup(branchCmd)
 	if branchOutput, err := branchCmd.Output(); err == nil {
 		branch := strings.TrimSpace(string(branchOutput))
-		info.OnMainBranch = (branch == "main" || branch == "master")
+		info.OnMainBranch = isBuildBranch(branch)
 	}
 
 	// Compare commits using prefix matching (handles short vs full hash)
@@ -127,11 +132,13 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 		// a crash loop when a crew worktree's HEAD was behind the binary's commit.
 		ancestorCmd := exec.Command("git", "merge-base", "--is-ancestor", info.BinaryCommit, "HEAD")
 		ancestorCmd.Dir = repoDir
+		util.SetDetachedProcessGroup(ancestorCmd)
 		info.IsForward = ancestorCmd.Run() == nil
 
 		// Try to count commits between binary and HEAD
 		countCmd := exec.Command("git", "rev-list", "--count", info.BinaryCommit+"..HEAD")
 		countCmd.Dir = repoDir
+		util.SetDetachedProcessGroup(countCmd)
 		if countOutput, err := countCmd.Output(); err == nil {
 			if count, parseErr := fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &info.CommitsBehind); parseErr != nil || count != 1 {
 				info.CommitsBehind = 0
@@ -180,6 +187,7 @@ func GetRepoRoot() (string, error) {
 
 	// Fall back to current directory's git repo (may be a crew rig)
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	util.SetDetachedProcessGroup(cmd)
 	if output, err := cmd.Output(); err == nil {
 		root := strings.TrimSpace(string(output))
 		if hasGtSource(root) {
@@ -194,6 +202,7 @@ func GetRepoRoot() (string, error) {
 func isGitRepo(dir string) bool {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = dir
+	util.SetDetachedProcessGroup(cmd)
 	return cmd.Run() == nil
 }
 
@@ -213,12 +222,28 @@ func onlyBeadsChanges(repoDir, binaryCommit string) bool {
 	// If this produces no output, all changes are within .beads/
 	cmd := exec.Command("git", "diff", "--name-only", binaryCommit+"..HEAD", "--", ".", ":!.beads")
 	cmd.Dir = repoDir
+	util.SetDetachedProcessGroup(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		// Can't determine — be conservative, assume stale
 		return false
 	}
 	return strings.TrimSpace(string(output)) == ""
+}
+
+// isBuildBranch returns true if the given branch is safe for automated rebuilds.
+// Accepted branches:
+//   - main, master: upstream default branches
+//   - carry/*: fork operational branches (e.g., carry/operational)
+//
+// This prevents automated rebuilds from random feature, fix, or polecat branches
+// which could cause downgrades or crash loops.
+func isBuildBranch(branch string) bool {
+	switch branch {
+	case "main", "master":
+		return true
+	}
+	return strings.HasPrefix(branch, "carry/")
 }
 
 // SetCommit allows the cmd package to pass in the build-time commit.
