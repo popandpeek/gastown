@@ -229,7 +229,7 @@ func TestConvoyCreate_DepAddUsesTownRoot(t *testing.T) {
 	beadsDir := filepath.Join(townRoot, ".beads")
 	typesList := "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"
 	_ = os.WriteFile(filepath.Join(beadsDir, ".gt-types-configured"), []byte(typesList), 0644)
-	_ = os.WriteFile(filepath.Join(beadsDir, ".gt-statuses-configured"), []byte("staged_ready,staged_warnings"), 0644)
+	_ = os.WriteFile(filepath.Join(beadsDir, ".gt-statuses-configured"), []byte("deploying,in_review,staged_ready,staged_warnings"), 0644)
 
 	// Track which directory dep add runs from.
 	depLogPath := filepath.Join(t.TempDir(), "dep-add.log")

@@ -50,6 +50,43 @@ nohup bash -c '
       CLICK_URL=$(echo "$line" | jq -r ".click // empty" 2>/dev/null)
       TIMESTAMP=$(echo "$line" | jq -r ".time // empty" 2>/dev/null)
 
+      # ── BEAD_STATUS handler ──────────────────────────────────────
+      # CI sends: Title: "BEAD_STATUS: be-xxx to <status>"
+      #           Body:  "bd update be-xxx --status <status>"
+      # We parse the title and execute bd commands to update Dolt.
+      if [[ "$TITLE" == BEAD_STATUS:* ]]; then
+        # Extract bead ID and target status from title
+        BEAD_ID=$(echo "$TITLE" | grep -oE "be-[a-z0-9]+" | head -1)
+        TARGET_STATUS=$(echo "$TITLE" | sed "s/.*to //" | tr -d "[:space:]")
+
+        if [ -n "$BEAD_ID" ] && [ -n "$TARGET_STATUS" ]; then
+          case "$TARGET_STATUS" in
+            closed)
+              bd close "$BEAD_ID" 2>/dev/null && \
+                echo "[$(date -Iseconds)] BEAD_STATUS: closed $BEAD_ID" >> "'"$LOGFILE"'" || \
+                echo "[$(date -Iseconds)] BEAD_STATUS: failed to close $BEAD_ID" >> "'"$LOGFILE"'"
+              bd label remove "$BEAD_ID" gt:slung 2>/dev/null || true
+              bd label remove "$BEAD_ID" gt:deploying 2>/dev/null || true
+              ;;
+            deploying)
+              bd update "$BEAD_ID" --status deploying 2>/dev/null && \
+                echo "[$(date -Iseconds)] BEAD_STATUS: $BEAD_ID -> deploying" >> "'"$LOGFILE"'" || \
+                echo "[$(date -Iseconds)] BEAD_STATUS: failed to update $BEAD_ID to deploying" >> "'"$LOGFILE"'"
+              bd label add "$BEAD_ID" gt:deploying 2>/dev/null || true
+              ;;
+            *)
+              bd update "$BEAD_ID" --status "$TARGET_STATUS" 2>/dev/null && \
+                echo "[$(date -Iseconds)] BEAD_STATUS: $BEAD_ID -> $TARGET_STATUS" >> "'"$LOGFILE"'" || \
+                echo "[$(date -Iseconds)] BEAD_STATUS: failed to update $BEAD_ID to $TARGET_STATUS" >> "'"$LOGFILE"'"
+              ;;
+          esac
+        else
+          echo "[$(date -Iseconds)] BEAD_STATUS: parse failed: $TITLE" >> "'"$LOGFILE"'"
+        fi
+        continue
+      fi
+
+      # ── Standard CI notification → mail to mayor ─────────────────
       # Determine severity from ntfy priority (1-5)
       SEVERITY="info"
       case "$PRIORITY" in

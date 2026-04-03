@@ -1,13 +1,16 @@
 package refinery
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/testutil"
@@ -224,6 +227,14 @@ func TestManager_PostMerge_ClosesMRAndSourceIssue(t *testing.T) {
 		t.Skipf("bd init unavailable: %v", err)
 	}
 
+	// Configure custom statuses (deploying, in_review) so bd update accepts them
+	cfgCmd := exec.Command("bd", "config", "set", "status.custom", constants.BeadsCustomStatuses)
+	cfgCmd.Dir = rigPath
+	cfgCmd.Env = append(os.Environ(), fmt.Sprintf("BEADS_DOLT_PORT=%d", port))
+	if out, err := cfgCmd.CombinedOutput(); err != nil {
+		t.Logf("bd config set status.custom: %s: %v", string(out), err)
+	}
+
 	// Create a source issue
 	srcIssue, err := b.Create(beads.CreateOptions{
 		Title: "Implement feature X",
@@ -254,8 +265,8 @@ func TestManager_PostMerge_ClosesMRAndSourceIssue(t *testing.T) {
 	if !result.MRClosed {
 		t.Error("PostMerge() MRClosed = false, want true")
 	}
-	if !result.SourceIssueClosed {
-		t.Error("PostMerge() SourceIssueClosed = false, want true")
+	if !result.SourceIssueDeploying {
+		t.Error("PostMerge() SourceIssueDeploying = false, want true")
 	}
 	if result.SourceIssueID != srcIssue.ID {
 		t.Errorf("PostMerge() SourceIssueID = %s, want %s", result.SourceIssueID, srcIssue.ID)
