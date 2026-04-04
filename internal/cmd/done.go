@@ -829,6 +829,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 					} else {
 						prURL = strings.TrimSpace(string(prOutput))
 						fmt.Printf("%s GitHub PR created: %s\n", style.Bold.Render("✓"), prURL)
+						// Write PR URL to work bead so Kanban shows PR# badge
+						if issueID != "" {
+							if refErr := bd.Update(issueID, beads.UpdateOptions{ExternalRef: &prURL}); refErr != nil {
+								style.PrintWarning("could not set externalRef on %s: %v", issueID, refErr)
+							}
+						}
 					}
 				} else {
 					fmt.Printf("%s\n", style.Dim.Render("Work stays on feature branch for human review."))
@@ -1083,6 +1089,24 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s\nBranch is pushed but MR bead not confirmed. Preserving worktree.", errMsg)
 				goto notifyWitness
+			}
+
+			// Write PR URL to work bead's externalRef so Kanban shows PR# badge.
+			// Detect PR via gh pr view on the branch — the polecat or formula
+			// may have created it before gt done runs.
+			if issueID != "" && branch != "" {
+				prViewCmd := exec.CommandContext(context.Background(), "gh", "pr", "view", branch, "--json", "url", "-q", ".url")
+				prViewCmd.Dir = cwd
+				if prViewOutput, prViewErr := prViewCmd.Output(); prViewErr == nil {
+					detectedPR := strings.TrimSpace(string(prViewOutput))
+					if detectedPR != "" {
+						if refErr := bd.Update(issueID, beads.UpdateOptions{ExternalRef: &detectedPR}); refErr != nil {
+							style.PrintWarning("could not set externalRef on %s: %v", issueID, refErr)
+						} else {
+							fmt.Printf("  %s PR linked: %s\n", style.Success.Render("✓"), detectedPR)
+						}
+					}
+				}
 			}
 
 			// GH#3032: Supersede older open MRs for the same source issue.

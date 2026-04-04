@@ -307,6 +307,7 @@ type UpdateOptions struct {
 	Priority     *int
 	Description  *string
 	Assignee     *string
+	ExternalRef  *string  // External reference (e.g., PR URL)
 	AddLabels    []string // Labels to add
 	RemoveLabels []string // Labels to remove
 	SetLabels    []string // Labels to set (replaces all existing)
@@ -1440,6 +1441,9 @@ func (b *Beads) Update(id string, opts UpdateOptions) error {
 	}
 	if opts.Assignee != nil {
 		args = append(args, "--assignee="+*opts.Assignee)
+	}
+	if opts.ExternalRef != nil {
+		args = append(args, "--external-ref="+*opts.ExternalRef)
 	}
 	// Label operations: set-labels replaces all, otherwise use add/remove
 	if len(opts.SetLabels) > 0 {
