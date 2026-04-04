@@ -171,6 +171,23 @@ func LoadRigConfig(path string) (*RigConfig, error) {
 	return &config, nil
 }
 
+// LoadRigConfigNamepool extracts just the namepool config from a rig's config.json.
+// Returns nil if no namepool is configured.
+func LoadRigConfigNamepool(path string) (*NamepoolConfig, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		return nil, err
+	}
+
+	var raw struct {
+		Namepool *NamepoolConfig `json:"namepool,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return raw.Namepool, nil
+}
+
 // SaveRigConfig saves a rig configuration to a file.
 func SaveRigConfig(path string, config *RigConfig) error {
 	if err := validateRigConfig(config); err != nil {

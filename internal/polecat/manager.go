@@ -138,17 +138,32 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
 
-	// Try to load rig settings for namepool config
+	// Try to load rig settings for namepool config.
+	// Check both settings/config.json (RigSettings) and config.json (RigConfig)
+	// since namepool may be configured in either location.
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
 	var pool *NamePool
+	var npConfig *config.NamepoolConfig
 
 	settings, err := config.LoadRigSettings(settingsPath)
 	if err == nil && settings.Namepool != nil {
+		npConfig = settings.Namepool
+	}
+
+	// Fall back to rig-level config.json namepool if settings doesn't have it
+	if npConfig == nil {
+		rigConfigPath := filepath.Join(r.Path, "config.json")
+		if rigCfg, rcErr := config.LoadRigConfigNamepool(rigConfigPath); rcErr == nil && rigCfg != nil {
+			npConfig = rigCfg
+		}
+	}
+
+	if npConfig != nil {
 		// If style is set but not built-in and no explicit names, resolve custom theme
-		names := settings.Namepool.Names
-		if len(names) == 0 && settings.Namepool.Style != "" && !IsBuiltinTheme(settings.Namepool.Style) {
+		names := npConfig.Names
+		if len(names) == 0 && npConfig.Style != "" && !IsBuiltinTheme(npConfig.Style) {
 			if townRoot, twErr := workspace.Find(r.Path); twErr == nil {
-				if resolved, rErr := ResolveThemeNames(townRoot, settings.Namepool.Style); rErr == nil {
+				if resolved, rErr := ResolveThemeNames(townRoot, npConfig.Style); rErr == nil {
 					names = resolved
 				}
 			}
@@ -156,9 +171,9 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 		pool = NewNamePoolWithConfig(
 			r.Path,
 			r.Name,
-			settings.Namepool.Style,
+			npConfig.Style,
 			names,
-			settings.Namepool.MaxBeforeNumbering,
+			npConfig.MaxBeforeNumbering,
 		)
 	} else {
 		// Use defaults
