@@ -622,21 +622,31 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 	// Set the source issue to deploying — GH Actions will close it after
 	// the release pipeline succeeds. This makes the bead visible in the
 	// Deploying kanban lane between merge and release.
+	// Try "deploying" (custom status) first, fall back to "in_progress" (built-in).
 	if mr.IssueID != "" {
-		deployingStatus := "deploying"
-		if err := b.Update(mr.IssueID, beads.UpdateOptions{Status: &deployingStatus}); err != nil {
-			// If status update fails (e.g., already closed), log and continue
-			if issue, showErr := b.Show(mr.IssueID); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
-				_, _ = fmt.Fprintf(m.output, "  %s source issue already closed: %s\n", style.Dim.Render("○"), mr.IssueID)
-				result.SourceIssueClosed = true
-			} else {
-				_, _ = fmt.Fprintf(m.output, "  %s set deploying: %v\n", style.Warning.Render("⚠"), err)
-				result.SourceIssueNotFound = true
+		deployed := false
+		for _, status := range []string{"deploying", "in_progress"} {
+			s := status
+			if err := b.Update(mr.IssueID, beads.UpdateOptions{Status: &s}); err != nil {
+				// Check if already terminal
+				if issue, showErr := b.Show(mr.IssueID); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
+					_, _ = fmt.Fprintf(m.output, "  %s source issue already closed: %s\n", style.Dim.Render("○"), mr.IssueID)
+					result.SourceIssueClosed = true
+					deployed = true
+					break
+				}
+				// "deploying" may not be a configured custom status — try next
+				continue
 			}
-		} else {
-			_, _ = fmt.Fprintf(m.output, "  %s Source issue → deploying: %s\n", style.Success.Render("✓"), mr.IssueID)
+			_, _ = fmt.Fprintf(m.output, "  %s Source issue → %s: %s\n", style.Success.Render("✓"), status, mr.IssueID)
 			result.SourceIssueDeploying = true
 			result.SourceIssueID = mr.IssueID
+			deployed = true
+			break
+		}
+		if !deployed {
+			_, _ = fmt.Fprintf(m.output, "  %s source issue status update failed: %s\n", style.Warning.Render("⚠"), mr.IssueID)
+			result.SourceIssueNotFound = true
 		}
 	}
 
