@@ -74,7 +74,7 @@ Tmux Integration:
 
 Event symbols:
   +  created/bonded    - New issue or molecule created
-  →  in_progress       - Work started on an issue
+  →  working       - Work started on an issue
   ✓  completed         - Issue closed or step completed
   ✗  failed            - Step or issue failed
   ⊘  deleted           - Issue removed

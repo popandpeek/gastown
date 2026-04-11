@@ -734,7 +734,7 @@ func determineCIStatus(checks []struct {
 		default:
 			// Check status for in-progress checks
 			switch check.Status {
-			case "queued", "in_progress", "waiting", "pending", "requested":
+			case "queued", "working", "waiting", "pending", "requested":
 				hasPending = true
 			}
 			// Also check state field
@@ -905,14 +905,14 @@ type assignedIssue struct {
 }
 
 // getAssignedIssuesMap returns a map of assignee -> assigned issue.
-// Queries beads for all in_progress issues with assignees.
+// Queries beads for all working issues with assignees.
 func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
 	result := make(map[string]assignedIssue)
 
-	// Query all in_progress issues (these are the ones being worked on)
-	stdout, err := f.runBdCmd(f.townRoot, "list", "--status=in_progress", "--json")
+	// Query all working issues (these are the ones being worked on)
+	stdout, err := f.runBdCmd(f.townRoot, "list", "--status=working", "--json")
 	if err != nil {
-		log.Printf("warning: bd list in_progress failed: %v", err)
+		log.Printf("warning: bd list working failed: %v", err)
 		return result
 	}
 

@@ -1159,7 +1159,7 @@ func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
 			switch args[0] {
 			case "list":
 				joined := strings.Join(args, " ")
-				if strings.Contains(joined, "--status=in_progress") {
+				if strings.Contains(joined, "--status=working") {
 					return `[
   {"id":"gt-orphan1","assignee":"testrig/polecats/alpha"},
   {"id":"gt-alive1","assignee":"testrig/polecats/bravo"},
@@ -1173,7 +1173,7 @@ func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
 				}
 				return "[]", nil
 			case "show":
-				return `[{"status":"in_progress"}]`, nil
+				return `[{"status":"working"}]`, nil
 			}
 			return "{}", nil
 		},
@@ -1188,29 +1188,29 @@ func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
 		t.Errorf("bd list was not called with --limit=0; log:\n%s", logStr)
 	}
 	// Verify both statuses were queried
-	if !strings.Contains(logStr, "--status=in_progress") {
-		t.Errorf("bd list was not called with --status=in_progress; log:\n%s", logStr)
+	if !strings.Contains(logStr, "--status=working") {
+		t.Errorf("bd list was not called with --status=working; log:\n%s", logStr)
 	}
 	if !strings.Contains(logStr, "--status=hooked") {
 		t.Errorf("bd list was not called with --status=hooked; log:\n%s", logStr)
 	}
 
 	// Should have checked 3 polecat assignees in "testrig":
-	// alpha (in_progress), bravo (in_progress), charlie (hooked)
+	// alpha (working), bravo (working), charlie (hooked)
 	// "crew/sean" is not a polecat, "" has no assignee,
 	// "otherrig/polecats/delta" is filtered out by rigName
 	if result.Checked != 3 {
-		t.Errorf("Checked = %d, want 3 (alpha + bravo from in_progress, charlie from hooked)", result.Checked)
+		t.Errorf("Checked = %d, want 3 (alpha + bravo from working, charlie from hooked)", result.Checked)
 	}
 
 	// Should have found 2 orphans:
-	// alpha (in_progress, no dir, no session) and charlie (hooked, no dir, no session)
+	// alpha (working, no dir, no session) and charlie (hooked, no dir, no session)
 	// bravo has directory so deferred to DetectZombiePolecats
 	if len(result.Orphans) != 2 {
 		t.Fatalf("Orphans = %d, want 2 (alpha + charlie)", len(result.Orphans))
 	}
 
-	// Verify first orphan (alpha from in_progress scan)
+	// Verify first orphan (alpha from working scan)
 	orphan := result.Orphans[0]
 	if orphan.BeadID != "gt-orphan1" {
 		t.Errorf("orphan[0] BeadID = %q, want %q", orphan.BeadID, "gt-orphan1")
@@ -1460,7 +1460,7 @@ func TestDetectOrphanedMolecules_WithMockBd(t *testing.T) {
   {"id":"gt-work-004","assignee":""}
 ]`, nil
 				}
-				if strings.Contains(joined, "--status=in_progress") {
+				if strings.Contains(joined, "--status=working") {
 					return "[]", nil
 				}
 				if strings.Contains(joined, "--parent=gt-mol-orphan") {

@@ -154,10 +154,10 @@ func TestIssueStatusConstants(t *testing.T) {
 	statuses := map[IssueStatus]string{
 		StatusOpen:        "open",
 		StatusClosed:      "closed",
-		StatusInProgress:  "in_progress",
+		StatusInProgress:  "working",
 		StatusTombstone:   "tombstone",
 		StatusBlocked:     "blocked",
-		StatusInReview:    "in_review",
+		StatusInReview:    "reviewing",
 		IssueStatusPinned: "pinned",
 		IssueStatusHooked: "hooked",
 	}

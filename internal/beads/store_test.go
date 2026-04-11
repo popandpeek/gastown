@@ -785,7 +785,7 @@ func TestStoreReleaseWithReason(t *testing.T) {
 		Title:    "in-progress",
 		Assignee: "agent-1",
 	}, "test")
-	store.issues["test-1"].Status = "in_progress"
+	store.issues["test-1"].Status = "working"
 
 	err := b.ReleaseWithReason("test-1", "agent stuck")
 	if err != nil {

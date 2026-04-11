@@ -44,7 +44,7 @@ EXAMPLES:
 
 func init() {
 	wlBrowseCmd.Flags().StringVar(&wlBrowseProject, "project", "", "Filter by project (e.g., gastown, beads, hop)")
-	wlBrowseCmd.Flags().StringVar(&wlBrowseStatus, "status", "open", "Filter by status (open, claimed, in_review, completed, withdrawn)")
+	wlBrowseCmd.Flags().StringVar(&wlBrowseStatus, "status", "open", "Filter by status (open, claimed, reviewing, completed, withdrawn)")
 	wlBrowseCmd.Flags().StringVar(&wlBrowseType, "type", "", "Filter by type (feature, bug, design, rfc, docs)")
 	wlBrowseCmd.Flags().IntVar(&wlBrowsePriority, "priority", -1, "Filter by priority (0=critical, 2=medium, 4=backlog)")
 	wlBrowseCmd.Flags().IntVar(&wlBrowseLimit, "limit", 50, "Maximum items to display")

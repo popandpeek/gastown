@@ -46,8 +46,8 @@ func TestLifecycle_PostClaimDone(t *testing.T) {
 	}
 
 	got, _ = store.QueryWanted("w-life1")
-	if got.Status != "in_review" {
-		t.Fatalf("after done: Status = %q, want %q", got.Status, "in_review")
+	if got.Status != "reviewing" {
+		t.Fatalf("after done: Status = %q, want %q", got.Status, "reviewing")
 	}
 }
 
@@ -99,9 +99,9 @@ func TestLifecycle_ClaimCompletedItem(t *testing.T) {
 	_ = store.ClaimWanted("w-completed", "rig-1")
 	_ = store.SubmitCompletion("c-1", "w-completed", "rig-1", "evidence")
 
-	// Trying to claim an in_review item should fail
+	// Trying to claim an reviewing item should fail
 	_, err := claimWanted(store, "w-completed", "rig-2")
 	if err == nil {
-		t.Fatal("claimWanted() should fail on in_review item")
+		t.Fatal("claimWanted() should fail on reviewing item")
 	}
 }

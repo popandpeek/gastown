@@ -306,7 +306,7 @@ func detectSessionState(ctx RoleContext) SessionState {
 
 	// Check for hooked work (autonomous state).
 	// Primary: read hook_bead from the agent bead's DB column (same strategy as gt hook).
-	// Fallback: query hooked/in_progress beads by assignee.
+	// Fallback: query hooked/working beads by assignee.
 	agentID := getAgentIdentity(ctx)
 	if agentID != "" {
 		// Use rig beads directory, not polecat worktree. Polecats don't have their
@@ -330,7 +330,7 @@ func detectSessionState(ctx RoleContext) SessionState {
 				hookBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBead.HookBead, ctx.WorkDir)
 				hb := beads.New(hookBeadDir)
 				if hookBead, err := hb.Show(agentBead.HookBead); err == nil && hookBead != nil &&
-					(hookBead.Status == beads.StatusHooked || hookBead.Status == "in_progress") {
+					(hookBead.Status == beads.StatusHooked || hookBead.Status == "working") {
 					state.State = "autonomous"
 					state.HookedBead = agentBead.HookBead
 					return state
@@ -349,9 +349,9 @@ func detectSessionState(ctx RoleContext) SessionState {
 			state.HookedBead = hookedBeads[0].ID
 			return state
 		}
-		// Also check in_progress beads
+		// Also check working beads
 		inProgressBeads, err := b.List(beads.ListOptions{
-			Status:   "in_progress",
+			Status:   "working",
 			Assignee: agentID,
 			Priority: -1,
 		})
@@ -374,7 +374,7 @@ func detectSessionState(ctx RoleContext) SessionState {
 				return state
 			}
 			if townIP, err := townB.List(beads.ListOptions{
-				Status:   "in_progress",
+				Status:   "working",
 				Assignee: agentID,
 				Priority: -1,
 			}); err == nil && len(townIP) > 0 {

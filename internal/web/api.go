@@ -1190,7 +1190,7 @@ func (h *APIHandler) handleIssueClose(w http.ResponseWriter, r *http.Request) {
 // IssueUpdateRequest is the request body for updating an issue.
 type IssueUpdateRequest struct {
 	ID       string `json:"id"`
-	Status   string `json:"status,omitempty"`   // "open", "in_progress"
+	Status   string `json:"status,omitempty"`   // "open", "working"
 	Priority int    `json:"priority,omitempty"` // 1-4
 	Assignee string `json:"assignee,omitempty"`
 }
@@ -1219,11 +1219,11 @@ func (h *APIHandler) handleIssueUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Status != "" {
 		// Validate allowed status values
 		switch req.Status {
-		case "open", "in_progress":
+		case "open", "working":
 			args = append(args, "--status="+req.Status)
 			hasUpdate = true
 		default:
-			h.sendError(w, "Invalid status (allowed: open, in_progress)", http.StatusBadRequest)
+			h.sendError(w, "Invalid status (allowed: open, working)", http.StatusBadRequest)
 			return
 		}
 	}

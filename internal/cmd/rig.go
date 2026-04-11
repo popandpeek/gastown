@@ -132,7 +132,7 @@ Examples:
   gt rig reset              # Reset all state
   gt rig reset --handoff    # Clear handoff content only
   gt rig reset --mail       # Clear stale mail messages only
-  gt rig reset --stale      # Reset orphaned in_progress issues
+  gt rig reset --stale      # Reset orphaned working issues
   gt rig reset --stale --dry-run  # Preview what would be reset`,
 	RunE: runRigReset,
 }
@@ -371,7 +371,7 @@ func init() {
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
 	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
-	rigResetCmd.Flags().BoolVar(&rigResetStale, "stale", false, "Reset orphaned in_progress issues (no active session)")
+	rigResetCmd.Flags().BoolVar(&rigResetStale, "stale", false, "Reset orphaned working issues (no active session)")
 	rigResetCmd.Flags().BoolVar(&rigResetDryRun, "dry-run", false, "Show what would be reset without making changes")
 	rigResetCmd.Flags().StringVar(&rigResetRole, "role", "", "Role to reset (default: auto-detect from cwd)")
 
@@ -1431,7 +1431,7 @@ func runRigReset(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Reset stale in_progress issues
+	// Reset stale working issues
 	if resetAll || rigResetStale {
 		if err := runResetStale(rigBd, rigResetDryRun); err != nil {
 			return fmt.Errorf("resetting stale issues: %w", err)
@@ -1441,21 +1441,21 @@ func runRigReset(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runResetStale resets in_progress issues whose assigned agent no longer has a session.
+// runResetStale resets working issues whose assigned agent no longer has a session.
 func runResetStale(bd *beads.Beads, dryRun bool) error {
 	t := tmux.NewTmux()
 
-	// Get all in_progress issues
+	// Get all working issues
 	issues, err := bd.List(beads.ListOptions{
-		Status:   "in_progress",
+		Status:   "working",
 		Priority: -1, // All priorities
 	})
 	if err != nil {
-		return fmt.Errorf("listing in_progress issues: %w", err)
+		return fmt.Errorf("listing working issues: %w", err)
 	}
 
 	if len(issues) == 0 {
-		fmt.Printf("%s No in_progress issues found\n", style.Success.Render("✓"))
+		fmt.Printf("%s No working issues found\n", style.Success.Render("✓"))
 		return nil
 	}
 

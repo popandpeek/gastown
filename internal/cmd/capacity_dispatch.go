@@ -286,7 +286,7 @@ func cleanupStaleContexts(townRoot string) {
 	workBeadInfo := batchFetchBeadInfoByIDs(townRoot, workBeadIDs)
 
 	// Second pass: close contexts whose work beads are stale.
-	// Note: in_progress is intentionally excluded — the work bead is being
+	// Note: working is intentionally excluded — the work bead is being
 	// actively worked, and bd ready won't return it, so the dispatch query
 	// already prevents re-dispatch. The context stays open until the polecat
 	// finishes and the bead transitions to closed/tombstone.

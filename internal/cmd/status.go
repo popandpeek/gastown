@@ -1822,7 +1822,7 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 	}
 
 	// Query for in-progress merge-requests
-	opts.Status = "in_progress"
+	opts.Status = "working"
 	inProgressMRs, err := b.List(opts)
 	if err != nil {
 		return nil

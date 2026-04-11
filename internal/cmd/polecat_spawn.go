@@ -445,10 +445,10 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		style.PrintWarning("could not update agent state after retries: %v", err)
 	}
 
-	// Update issue status from hooked to in_progress.
+	// Update issue status from hooked to working.
 	// Also warn-only for the same reason: session is already running.
 	if err := polecatMgr.SetState(s.PolecatName, polecat.StateWorking); err != nil {
-		style.PrintWarning("could not update issue status to in_progress: %v", err)
+		style.PrintWarning("could not update issue status to working: %v", err)
 	}
 
 	// Get pane — if this fails, the session may have died during startup.

@@ -121,7 +121,7 @@ func TestIsDeferredBead(t *testing.T) {
 		want bool
 	}{
 		{"open bead is not deferred", &beadInfo{Status: "open", Description: "some task"}, false},
-		{"in_progress bead is not deferred", &beadInfo{Status: "in_progress", Description: "working on it"}, false},
+		{"working bead is not deferred", &beadInfo{Status: "working", Description: "working on it"}, false},
 		{"deferred status", &beadInfo{Status: "deferred", Description: "some task"}, true},
 		{"description says deferred to post-launch", &beadInfo{Status: "open", Description: "deferred to post-launch"}, true},
 		{"description says deferred to post launch", &beadInfo{Status: "open", Description: "deferred to post launch"}, true},
@@ -179,7 +179,7 @@ func TestCollectExistingMoleculesFiltersClosedMolecules(t *testing.T) {
 			info: &beadInfo{
 				Dependencies: []beads.IssueDep{
 					{ID: "bd-wisp-dead", Status: "closed"},
-					{ID: "bd-wisp-live", Status: "in_progress"},
+					{ID: "bd-wisp-live", Status: "working"},
 				},
 			},
 			want: []string{"bd-wisp-live"},

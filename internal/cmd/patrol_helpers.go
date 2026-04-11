@@ -41,7 +41,7 @@ const maxStalePurgePerRun = 5
 //
 // Patrol molecules are intentionally hooked to the agent (hooked status).
 // This function looks up hooked patrols and distinguishes active ones
-// (with open/in_progress children) from stale ones (all children closed,
+// (with open/working children) from stale ones (all children closed,
 // e.g. after a squash that didn't close the root). Stale patrols are
 // cleaned up incrementally (up to maxStalePurgePerRun per call); any
 // remaining stale beads are cleaned by burnPreviousPatrolWisps at cycle end.
@@ -119,7 +119,7 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 }
 
 // checkHasOpenChildren returns true if the given parent has any children
-// that are not in closed status (i.e., open or in_progress).
+// that are not in closed status (i.e., open or working).
 // Returns an error if the child listing fails, so the caller can avoid
 // destructive cleanup on transient failures.
 //

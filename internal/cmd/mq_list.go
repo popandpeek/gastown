@@ -213,7 +213,7 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		switch displayStatus {
 		case "ready":
 			styledStatus = style.Success.Render("ready")
-		case "in_progress":
+		case "working":
 			styledStatus = style.Warning.Render("active")
 		case "blocked":
 			styledStatus = style.Dim.Render("blocked")

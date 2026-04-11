@@ -71,7 +71,7 @@ type RoleHealthConfig struct {
 	// KillCooldown is the minimum time between force-kills.
 	KillCooldown Duration `toml:"kill_cooldown"`
 
-	// StuckThreshold is how long a wisp can be in_progress before considered stuck.
+	// StuckThreshold is how long a wisp can be working before considered stuck.
 	StuckThreshold Duration `toml:"stuck_threshold"`
 
 	// HungSessionThreshold is how long a tmux session can be inactive before

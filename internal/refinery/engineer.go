@@ -1144,7 +1144,7 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		}
 	}
 
-	// 1. Set source issue to in_pipeline — the bead is merged to release but
+	// 1. Set source issue to deploying — the bead is merged to release but
 	// not yet on main. GH Actions will close it after merge-to-main succeeds.
 	if mr.SourceIssue != "" {
 		// Check if already closed (by polecat's gt done) — that's fine
@@ -1153,9 +1153,9 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		} else {
 			status := string(beads.StatusInPipeline)
 			if err := e.beads.Update(mr.SourceIssue, beads.UpdateOptions{Status: &status}); err != nil {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to set source issue %s to in_pipeline: %v\n", mr.SourceIssue, err)
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to set source issue %s to deploying: %v\n", mr.SourceIssue, err)
 			} else {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Set source issue to in_pipeline: %s\n", mr.SourceIssue)
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Set source issue to deploying: %s\n", mr.SourceIssue)
 			}
 		}
 	}

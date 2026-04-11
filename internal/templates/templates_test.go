@@ -230,7 +230,7 @@ func TestRenderMessage_Nudge(t *testing.T) {
 		NudgeCount: 2,
 		MaxNudges:  3,
 		Issue:      "gt-123",
-		Status:     "in_progress",
+		Status:     "working",
 	}
 
 	output, err := tmpl.RenderMessage("nudge", data)

@@ -1175,14 +1175,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				}
 			}
 
-			// Deterministic status transition: hooked → in_review.
+			// Deterministic status transition: hooked → reviewing.
 			// MR creation implies a PR exists (the gt wrapper blocks gt done without one).
 			// This makes the "in review" stage visible on kanban pipeline views.
 			// Status transitions are in Go code, not formulas:
-			//   gt sling → hooked | gt done + MR → in_review | refinery merge → closed
+			//   gt sling → hooked | gt done + MR → reviewing | refinery merge → closed
 			if issueID != "" {
 				if _, err := bd.Run("update", issueID, "--status="+string(beads.StatusInReview)); err != nil {
-					style.PrintWarning("could not set %s to in_review: %v", issueID, err)
+					style.PrintWarning("could not set %s to reviewing: %v", issueID, err)
 				}
 			}
 
@@ -1595,12 +1595,12 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID, mrID string) {
 	if hookedBeadID != "" && exitType != ExitDeferred {
 		// BUG FIX (gt-pftz): Close hooked bead unless already terminal (closed/tombstone).
 		// Previously checked hookedBead.Status == StatusHooked, but polecats update
-		// their work bead to in_progress during work. The exact-match check caused
+		// their work bead to working during work. The exact-match check caused
 		// gt done to skip closing the bead, leaving it as unassigned open work after
 		// the hook was cleared — triggering infinite dispatch loops.
 		//
 		// DEFERRED exits preserve the bead: work is paused, not done. The bead
-		// stays open/in_progress so it can be resumed on the next session.
+		// stays open/working so it can be resumed on the next session.
 		if hookedBead, err := bd.Show(hookedBeadID); err == nil && !beads.IssueStatus(hookedBead.Status).IsTerminal() && !beads.IssueStatus(hookedBead.Status).IsAwaitingMerge() {
 			// Guard: never close a rig identity bead. Polecats dispatched with the
 			// rig bead as their hook (via mol-polecat-work) must not close permanent
@@ -1618,7 +1618,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID, mrID string) {
 			attachment := beads.ParseAttachmentFields(hookedBead)
 			if attachment != nil && attachment.AttachedMolecule != "" {
 				// Close molecule step descendants before closing the wisp root.
-				// bd close doesn't cascade — without this, open/in_progress steps
+				// bd close doesn't cascade — without this, open/working steps
 				// from the molecule stay stuck forever after gt done completes.
 				// Order: step children -> wisp root -> base bead.
 				if n := closeDescendants(bd, attachment.AttachedMolecule); n > 0 {
@@ -1626,7 +1626,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID, mrID string) {
 				}
 
 				// Close the wisp root with --force and audit reason.
-				// ForceCloseWithReason handles any status (hooked, open, in_progress)
+				// ForceCloseWithReason handles any status (hooked, open, working)
 				// and records the reason + session for attribution.
 				// Same pattern as gt mol burn/squash (#1879).
 				if closeErr := bd.ForceCloseWithReason("done", attachment.AttachedMolecule); closeErr != nil {
@@ -1645,18 +1645,18 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID, mrID string) {
 				style.PrintWarning("hooked bead %s has %d unchecked acceptance criteria — skipping close", hookedBeadID, unchecked)
 				fmt.Fprintf(os.Stderr, "  The bead will remain open for witness/mayor review.\n")
 			} else if mrID != "" {
-				// MR was created — set bead to in_review instead of closing.
-				// CI pipeline will drive the lifecycle: in_review → deploying → closed.
+				// MR was created — set bead to reviewing instead of closing.
+				// CI pipeline will drive the lifecycle: reviewing → deploying → closed.
 				// This ensures Kanban lanes reflect reality.
-				inReview := "in_review"
-				if err := bd.Update(hookedBeadID, beads.UpdateOptions{Status: &inReview}); err != nil {
+				reviewing := string(beads.StatusInReview)
+				if err := bd.Update(hookedBeadID, beads.UpdateOptions{Status: &reviewing}); err != nil {
 					// Fallback: try close if status update fails
-					fmt.Fprintf(os.Stderr, "Warning: couldn't set %s to in_review: %v (falling back to close)\n", hookedBeadID, err)
+					fmt.Fprintf(os.Stderr, "Warning: couldn't set %s to reviewing: %v (falling back to close)\n", hookedBeadID, err)
 					if closeErr := bd.Close(hookedBeadID); closeErr != nil {
 						fmt.Fprintf(os.Stderr, "Warning: couldn't close hooked bead %s: %v\n", hookedBeadID, closeErr)
 					}
 				} else {
-					fmt.Printf("%s Issue %s → in_review (CI will drive to closed)\n", style.Bold.Render("✓"), hookedBeadID)
+					fmt.Printf("%s Issue %s → reviewing (CI will drive to closed)\n", style.Bold.Render("✓"), hookedBeadID)
 				}
 			} else if err := bd.Close(hookedBeadID); err != nil {
 				// No MR (zero-commit or direct merge) — close directly.

@@ -208,7 +208,7 @@ func extractMoleculeIDFromStep(stepID string) string {
 // findAllReadySteps finds all ready steps in a molecule.
 // Returns (readySteps, allComplete, error).
 // If all steps are complete, returns (nil, true, nil).
-// If no steps are ready but some are blocked/in_progress, returns (nil, false, nil).
+// If no steps are ready but some are blocked/working, returns (nil, false, nil).
 //
 // Delegates readiness calculation to beads' canonical bd ready --mol command,
 // which uses the materialized blocked_issues_cache for correct handling of all
@@ -361,23 +361,23 @@ func handleParallelSteps(cwd, townRoot, _ string, steps []*beads.Issue, dryRun b
 
 	// For parallel execution, we use goroutines with a WaitGroup
 	// Each step is executed by running its commands in sequence
-	// For now, we execute them sequentially but mark them all as in_progress first
+	// For now, we execute them sequentially but mark them all as working first
 	// TODO: True parallel execution requires spawning subagents or separate tmux panes
 
 	fmt.Printf("\n%s Executing parallel steps...\n", style.Bold.Render("🔄"))
 
-	// Mark all steps as in_progress
+	// Mark all steps as working
 	gitRoot, err := getGitRoot()
 	if err != nil {
 		return fmt.Errorf("finding git root: %w", err)
 	}
 
 	for _, step := range steps {
-		markCmd := exec.Command("bd", "update", step.ID, "--status=in_progress")
+		markCmd := exec.Command("bd", "update", step.ID, "--status=working")
 		markCmd.Dir = gitRoot
 		markCmd.Stderr = os.Stderr
 		if err := markCmd.Run(); err != nil {
-			style.PrintWarning("could not mark step %s as in_progress: %v", step.ID, err)
+			style.PrintWarning("could not mark step %s as working: %v", step.ID, err)
 		}
 	}
 
@@ -411,7 +411,7 @@ func handleParallelSteps(cwd, townRoot, _ string, steps []*beads.Issue, dryRun b
 		}
 	}
 
-	fmt.Printf("\n%s All parallel steps marked as in_progress\n", style.Bold.Render("✓"))
+	fmt.Printf("\n%s All parallel steps marked as working\n", style.Bold.Render("✓"))
 	fmt.Printf("%s Execute each step and close with: gt mol step done <step-id>\n", style.Dim.Render("ℹ"))
 	fmt.Printf("%s Once all parallel steps are closed, the gather step will become ready\n", style.Dim.Render("ℹ"))
 

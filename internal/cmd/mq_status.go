@@ -230,8 +230,8 @@ func formatStatus(status string) string {
 	switch status {
 	case "open":
 		return style.Info.Render("● open")
-	case "in_progress":
-		return style.Bold.Render("▶ in_progress")
+	case "working":
+		return style.Bold.Render("▶ working")
 	case "closed":
 		return style.Dim.Render("✓ closed")
 	default:
@@ -244,7 +244,7 @@ func getStatusIcon(status string) string {
 	switch status {
 	case "open":
 		return "○"
-	case "in_progress":
+	case "working":
 		return "▶"
 	case "closed":
 		return "✓"

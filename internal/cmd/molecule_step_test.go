@@ -217,10 +217,10 @@ func TestStepDoneScenarios(t *testing.T) {
 			stepID: "gt-mol.1",
 			setupFunc: func(m *mockBeadsForStep) {
 				m.addIssue(makeStepIssue("gt-mol.1", "Step 1", "gt-mol", "open", nil))
-				m.addIssue(makeStepIssue("gt-mol.2", "Step 2", "gt-mol", "in_progress", nil)) // another parallel task
+				m.addIssue(makeStepIssue("gt-mol.2", "Step 2", "gt-mol", "working", nil)) // another parallel task
 				m.addIssue(makeStepIssue("gt-mol.3", "Synthesis", "gt-mol", "open", []string{"gt-mol.1", "gt-mol.2"}))
 			},
-			wantAction: "no_more_ready", // .2 is in_progress, .3 blocked
+			wantAction: "no_more_ready", // .2 is working, .3 blocked
 		},
 		{
 			name:   "parallel workflow - complete one, next ready",
@@ -265,7 +265,7 @@ func TestStepDoneScenarios(t *testing.T) {
 					openStepIDs = append(openStepIDs, child.ID)
 					hasNonClosedSteps = true
 				default:
-					// in_progress or other - not closed, not available
+					// working or other - not closed, not available
 					hasNonClosedSteps = true
 				}
 			}

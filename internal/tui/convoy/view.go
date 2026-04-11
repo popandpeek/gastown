@@ -141,7 +141,7 @@ func statusToIcon(status string) string {
 		return "🚚"
 	case "closed":
 		return "✓"
-	case "in_progress":
+	case "working":
 		return "→"
 	default:
 		return "●"

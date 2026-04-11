@@ -986,12 +986,12 @@ func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 }
 
 // GetAssignedIssue returns the first issue assigned to the given assignee.
-// Checks open, in_progress, and hooked statuses (hooked = work on agent's hook).
+// Checks open, working, and hooked statuses (hooked = work on agent's hook).
 // Returns nil if no matching issue is assigned.
 func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
-	// Check all active work statuses: open, in_progress, and hooked
+	// Check all active work statuses: open, working, and hooked
 	// "hooked" status is set by gt sling when work is attached to an agent's hook
-	for _, status := range []string{"open", "in_progress", StatusHooked} {
+	for _, status := range []string{"open", "working", StatusHooked} {
 		issues, err := b.List(ListOptions{
 			Status:   status,
 			Assignee: assignee,
@@ -1539,14 +1539,14 @@ func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
 	return err
 }
 
-// Release moves an in_progress issue back to open status.
+// Release moves an working issue back to open status.
 // This is used to recover stuck steps when a worker dies mid-task.
 // It clears the assignee so the step can be claimed by another worker.
 func (b *Beads) Release(id string) error {
 	return b.ReleaseWithReason(id, "")
 }
 
-// ReleaseWithReason moves an in_progress issue back to open status with a reason.
+// ReleaseWithReason moves an working issue back to open status with a reason.
 // The reason is added as a note to the issue for tracking purposes.
 func (b *Beads) ReleaseWithReason(id, reason string) error {
 	if b.store != nil {

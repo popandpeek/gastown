@@ -1188,8 +1188,8 @@ func TestConvoyInfoFallbackChain(t *testing.T) {
 
 // TestHookedBeadCloseNotRestrictedToHookedStatus verifies the gt-pftz fix:
 // gt done must close the hooked bead regardless of its current status (hooked,
-// in_progress, open), not only when status == "hooked". Polecats update their
-// work bead to in_progress during work, so the old exact-match check skipped
+// working, open), not only when status == "hooked". Polecats update their
+// work bead to working during work, so the old exact-match check skipped
 // closing and caused infinite dispatch loops.
 func TestHookedBeadCloseNotRestrictedToHookedStatus(t *testing.T) {
 	tests := []struct {
@@ -1198,10 +1198,10 @@ func TestHookedBeadCloseNotRestrictedToHookedStatus(t *testing.T) {
 		wantClose  bool
 	}{
 		{"status hooked → close", "hooked", true},
-		{"status in_progress → close", "in_progress", true},
+		{"status working → close", "working", true},
 		{"status open → close", "open", true},
 		{"status blocked → close", "blocked", true},
-		{"status in_review → skip (awaiting merge)", "in_review", false},
+		{"status reviewing → skip (awaiting merge)", "reviewing", false},
 		{"status closed → skip (terminal)", "closed", false},
 		{"status tombstone → skip (terminal)", "tombstone", false},
 	}

@@ -180,14 +180,14 @@ exit 0
 
 // TestUpdateOptions verifies UpdateOptions pointer fields.
 func TestUpdateOptions(t *testing.T) {
-	status := "in_progress"
+	status := "working"
 	priority := 1
 	opts := UpdateOptions{
 		Status:   &status,
 		Priority: &priority,
 	}
-	if *opts.Status != "in_progress" {
-		t.Errorf("Status = %q, want in_progress", *opts.Status)
+	if *opts.Status != "working" {
+		t.Errorf("Status = %q, want working", *opts.Status)
 	}
 	if *opts.Priority != 1 {
 		t.Errorf("Priority = %d, want 1", *opts.Priority)

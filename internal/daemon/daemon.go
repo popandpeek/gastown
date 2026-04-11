@@ -2468,13 +2468,13 @@ func (d *Daemon) isBeadClosed(beadID string) bool {
 }
 
 // hasAssignedOpenWork checks if any work bead is assigned to the given polecat
-// with a non-terminal status (hooked, in_progress, or open). This is the
+// with a non-terminal status (hooked, working, or open). This is the
 // authoritative source of polecat work — the sling code sets status=hooked +
 // assignee on the work bead, but no longer maintains the agent bead's hook_bead
 // field (updateAgentHookBead is a no-op). Without this fallback, the idle reaper
 // kills working polecats whose agent bead hook_bead is stale.
 func (d *Daemon) hasAssignedOpenWork(rigName, assignee string) bool {
-	for _, status := range []string{"hooked", "in_progress", "open"} {
+	for _, status := range []string{"hooked", "working", "open"} {
 		cmd := exec.Command(d.bdPath, "list", "--rig="+rigName, "--assignee="+assignee, "--status="+status, "--json") //nolint:gosec // G204: args are constructed internally
 		cmd.Dir = d.config.TownRoot
 		cmd.Env = os.Environ()

@@ -201,7 +201,7 @@ func parentExcludeJoin(dbName string) (joinClause, whereCondition string) {
 		FROM wisp_dependencies wd
 		LEFT JOIN wisps pw ON pw.id = wd.depends_on_id LEFT JOIN issues pi ON pi.id = wd.depends_on_id
 		WHERE wd.type = 'parent-child'
-		AND (pw.status IN ('open', 'hooked', 'in_progress') OR pi.status IN ('open', 'in_progress'))
+		AND (pw.status IN ('open', 'hooked', 'working') OR pi.status IN ('open', 'working'))
 	) open_parent ON open_parent.issue_id = w.id`
 	whereCondition = "open_parent.issue_id IS NULL"
 	return
@@ -236,7 +236,7 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 	// Count reap candidates: open wisps past max_age with eligible parent status.
 	// Uses LEFT JOIN anti-pattern instead of correlated EXISTS to avoid O(n*m) cost (gt-jd1z).
 	reapQuery := fmt.Sprintf(
-		"SELECT COUNT(*) FROM wisps w %s WHERE w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s",
+		"SELECT COUNT(*) FROM wisps w %s WHERE w.status IN ('open', 'hooked', 'working') AND w.created_at < ? AND %s",
 		parentJoin, parentWhere)
 	if err := db.QueryRowContext(ctx, reapQuery, now.Add(-maxAge)).Scan(&result.ReapCandidates); err != nil {
 		return nil, fmt.Errorf("count reap candidates: %w", err)
@@ -266,19 +266,19 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 	// Same caveat: issues/dependencies tables may live on a separate Dolt instance.
 	staleQuery := `
 		SELECT COUNT(*) FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
+		WHERE i.status IN ('open', 'working')
 		AND i.updated_at < ?
 		AND i.priority > 1
 		AND i.issue_type != 'epic'
 		AND i.id NOT IN (
 			SELECT DISTINCT d.issue_id FROM dependencies d
 			INNER JOIN issues dep ON d.depends_on_id = dep.id
-			WHERE dep.status IN ('open', 'in_progress')
+			WHERE dep.status IN ('open', 'working')
 		)
 		AND i.id NOT IN (
 			SELECT DISTINCT d.depends_on_id FROM dependencies d
 			INNER JOIN issues blocker ON d.issue_id = blocker.id
-			WHERE blocker.status IN ('open', 'in_progress')
+			WHERE blocker.status IN ('open', 'working')
 		)`
 	if err := db.QueryRowContext(ctx, staleQuery, now.Add(-staleIssueAge)).Scan(&result.StaleCandidates); err != nil {
 		if !isTableNotFound(err) {
@@ -288,7 +288,7 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 	}
 
 	// Total open wisps.
-	openQuery := "SELECT COUNT(*) FROM wisps WHERE status IN ('open', 'hooked', 'in_progress')"
+	openQuery := "SELECT COUNT(*) FROM wisps WHERE status IN ('open', 'hooked', 'working')"
 	if err := db.QueryRowContext(ctx, openQuery).Scan(&result.OpenWisps); err != nil {
 		return nil, fmt.Errorf("count open wisps: %w", err)
 	}
@@ -322,7 +322,7 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 	// Exclude agent beads (issue_type='agent') from reaping — they have persistent
 	// identity and should not be closed by the wisp reaper regardless of age.
 	whereClause := fmt.Sprintf(
-		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND w.issue_type != 'agent' AND %s", parentWhere)
+		"w.status IN ('open', 'hooked', 'working') AND w.created_at < ? AND w.issue_type != 'agent' AND %s", parentWhere)
 
 	result := &ReapResult{Database: dbName, DryRun: dryRun}
 
@@ -331,7 +331,7 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 		if err := db.QueryRowContext(ctx, countQuery, cutoff).Scan(&result.Reaped); err != nil {
 			return nil, fmt.Errorf("dry-run count: %w", err)
 		}
-		openQuery := "SELECT COUNT(*) FROM wisps WHERE status IN ('open', 'hooked', 'in_progress')"
+		openQuery := "SELECT COUNT(*) FROM wisps WHERE status IN ('open', 'hooked', 'working')"
 		if err := db.QueryRowContext(ctx, openQuery).Scan(&result.OpenRemain); err != nil {
 			return nil, fmt.Errorf("count open: %w", err)
 		}
@@ -416,7 +416,7 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 		}
 	}
 
-	openQuery := "SELECT COUNT(*) FROM wisps WHERE status IN ('open', 'hooked', 'in_progress')"
+	openQuery := "SELECT COUNT(*) FROM wisps WHERE status IN ('open', 'hooked', 'working')"
 	if err := db.QueryRowContext(ctx, openQuery).Scan(&result.OpenRemain); err != nil {
 		return result, fmt.Errorf("count open: %w", err)
 	}
@@ -592,7 +592,7 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 	result := &AutoCloseResult{Database: dbName, DryRun: dryRun}
 
 	whereClause := fmt.Sprintf(`
-		i.status IN ('open', 'in_progress')
+		i.status IN ('open', 'working')
 		AND i.updated_at < ?
 		AND i.priority > 1
 		AND i.issue_type != 'epic'
@@ -603,12 +603,12 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 		AND i.id NOT IN (
 			SELECT DISTINCT d.issue_id FROM `+"`%s`"+`.dependencies d
 			INNER JOIN `+"`%s`"+`.issues dep ON d.depends_on_id = dep.id
-			WHERE dep.status IN ('open', 'in_progress')
+			WHERE dep.status IN ('open', 'working')
 		)
 		AND i.id NOT IN (
 			SELECT DISTINCT d.depends_on_id FROM `+"`%s`"+`.dependencies d
 			INNER JOIN `+"`%s`"+`.issues blocker ON d.issue_id = blocker.id
-			WHERE blocker.status IN ('open', 'in_progress')
+			WHERE blocker.status IN ('open', 'working')
 		)`, dbName, dbName, dbName, dbName, dbName)
 
 	// Two-step SELECT-then-UPDATE to avoid self-referencing subquery in UPDATE,
@@ -786,7 +786,7 @@ func ClosePluginReceipts(db *sql.DB, dbName string, maxAge time.Duration, dryRun
 	selectQuery := fmt.Sprintf(`
 		SELECT i.id FROM `+"`%s`"+`.issues i
 		INNER JOIN `+"`%s`"+`.labels l ON i.id = l.issue_id
-		WHERE i.status IN ('open', 'in_progress')
+		WHERE i.status IN ('open', 'working')
 		AND l.label = 'type:plugin-run'
 		AND i.created_at < ?`, dbName, dbName)
 
@@ -872,7 +872,7 @@ func ClosePluginDispatches(db *sql.DB, dbName string, maxAge time.Duration, dryR
 		SELECT i.id FROM `+"`%s`"+`.issues i
 		INNER JOIN `+"`%s`"+`.labels l1 ON i.id = l1.issue_id
 		INNER JOIN `+"`%s`"+`.labels l2 ON i.id = l2.issue_id
-		WHERE i.status IN ('open', 'in_progress')
+		WHERE i.status IN ('open', 'working')
 		AND l1.label = 'gt:message'
 		AND l2.label = 'from:daemon'
 		AND i.title LIKE 'Plugin:%%'

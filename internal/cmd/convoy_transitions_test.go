@@ -14,7 +14,7 @@ func TestEnsureKnownConvoyStatus(t *testing.T) {
 	if err := ensureKnownConvoyStatus(" closed "); err != nil {
 		t.Fatalf("expected closed to be accepted: %v", err)
 	}
-	if err := ensureKnownConvoyStatus("in_progress"); err == nil {
+	if err := ensureKnownConvoyStatus("working"); err == nil {
 		t.Fatal("expected unknown status to be rejected")
 	}
 }
@@ -32,7 +32,7 @@ func TestValidateConvoyStatusTransition(t *testing.T) {
 		{name: "closed to open", current: "closed", target: "open", wantErr: false},
 		{name: "same open", current: "open", target: "open", wantErr: false},
 		{name: "same closed", current: "closed", target: "closed", wantErr: false},
-		{name: "unknown current", current: "in_progress", target: "closed", wantErr: true},
+		{name: "unknown current", current: "working", target: "closed", wantErr: true},
 		{name: "unknown target", current: "open", target: "archived", wantErr: true},
 	}
 

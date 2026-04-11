@@ -903,7 +903,7 @@ type RoleConfig struct {
 	// Format: duration string (e.g., "5m", "10m"). Default: 5m.
 	KillCooldown string
 
-	// StuckThreshold is how long a wisp can be in_progress before considered stuck.
+	// StuckThreshold is how long a wisp can be working before considered stuck.
 	// Format: duration string (e.g., "1h", "30m"). Default: 1h.
 	StuckThreshold string
 

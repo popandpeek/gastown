@@ -721,7 +721,7 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) (*beads.Issue, error) {
 			hookBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBead.HookBead, ctx.WorkDir)
 			hb := beads.New(hookBeadDir)
 			if hookBead, err := hb.Show(agentBead.HookBead); err == nil && hookBead != nil &&
-				(hookBead.Status == beads.StatusHooked || hookBead.Status == "in_progress") {
+				(hookBead.Status == beads.StatusHooked || hookBead.Status == "working") {
 				return hookBead, nil
 			}
 		}
@@ -737,10 +737,10 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) (*beads.Issue, error) {
 		return nil, fmt.Errorf("querying hooked beads: %w", err)
 	}
 
-	// Fall back to in_progress beads (session interrupted before completion)
+	// Fall back to working beads (session interrupted before completion)
 	if len(hookedBeads) == 0 {
 		inProgressBeads, err := b.List(beads.ListOptions{
-			Status:   "in_progress",
+			Status:   "working",
 			Assignee: agentID,
 			Priority: -1,
 		})
@@ -764,7 +764,7 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) (*beads.Issue, error) {
 		}); err == nil && len(townHooked) > 0 {
 			hookedBeads = townHooked
 		} else if townIP, err := townB.List(beads.ListOptions{
-			Status:   "in_progress",
+			Status:   "working",
 			Assignee: agentID,
 			Priority: -1,
 		}); err == nil && len(townIP) > 0 {

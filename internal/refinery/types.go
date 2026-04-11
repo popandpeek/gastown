@@ -52,7 +52,7 @@ const (
 	MROpen MRStatus = "open"
 
 	// MRInProgress means the MR is currently being merged by the Engineer.
-	MRInProgress MRStatus = "in_progress"
+	MRInProgress MRStatus = "working"
 
 	// MRClosed means the MR processing is complete (merged, rejected, etc).
 	MRClosed MRStatus = "closed"
@@ -60,7 +60,7 @@ const (
 
 // Extended MR statuses for the v2 state machine.
 // These are stored in the MR bead's checkpoint/claim fields, not in the
-// beads status field (which remains open/in_progress/closed for compatibility).
+// beads status field (which remains open/working/closed for compatibility).
 type MRPhase string
 
 const (
@@ -156,9 +156,9 @@ var (
 // ValidateTransition checks if a state transition from -> to is valid.
 //
 // Valid transitions:
-//   - open → in_progress (Engineer claims MR)
-//   - in_progress → closed (merge success or rejection)
-//   - in_progress → open (failure, reassign to worker)
+//   - open → working (Engineer claims MR)
+//   - working → closed (merge success or rejection)
+//   - working → open (failure, reassign to worker)
 //   - open → closed (manual rejection)
 //
 // Invalid:
@@ -177,14 +177,14 @@ func ValidateTransition(from, to MRStatus) error {
 	// Check valid transitions
 	switch from {
 	case MROpen:
-		// open → in_progress: Engineer claims MR
+		// open → working: Engineer claims MR
 		// open → closed: manual rejection
 		if to == MRInProgress || to == MRClosed {
 			return nil
 		}
 	case MRInProgress:
-		// in_progress → closed: merge success or rejection
-		// in_progress → open: failure, reassign to worker
+		// working → closed: merge success or rejection
+		// working → open: failure, reassign to worker
 		if to == MRClosed || to == MROpen {
 			return nil
 		}
@@ -219,11 +219,11 @@ func (mr *MergeRequest) Close(reason CloseReason) error {
 	return nil
 }
 
-// Reopen reopens a failed MR (transitions from in_progress back to open).
+// Reopen reopens a failed MR (transitions from working back to open).
 // Returns an error if the transition is not allowed.
 func (mr *MergeRequest) Reopen() error {
 	if mr.Status != MRInProgress {
-		return fmt.Errorf("%w: can only reopen from in_progress, current status is %s",
+		return fmt.Errorf("%w: can only reopen from working, current status is %s",
 			ErrInvalidTransition, mr.Status)
 	}
 	mr.Status = MROpen
@@ -231,7 +231,7 @@ func (mr *MergeRequest) Reopen() error {
 	return nil
 }
 
-// Claim transitions the MR from open to in_progress (Engineer claims it).
+// Claim transitions the MR from open to working (Engineer claims it).
 // Returns an error if the transition is not allowed.
 func (mr *MergeRequest) Claim() error {
 	if mr.Status != MROpen {

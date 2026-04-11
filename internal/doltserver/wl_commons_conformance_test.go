@@ -112,8 +112,8 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		if err != nil {
 			t.Fatalf("QueryWanted() error: %v", err)
 		}
-		if got.Status != "in_review" {
-			t.Errorf("Status = %q, want %q", got.Status, "in_review")
+		if got.Status != "reviewing" {
+			t.Errorf("Status = %q, want %q", got.Status, "reviewing")
 		}
 	})
 
@@ -268,19 +268,19 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 			t.Fatalf("first SubmitCompletion() error: %v", err)
 		}
 
-		// Second completion on an already in_review item must fail
+		// Second completion on an already reviewing item must fail
 		err := store.SubmitCompletion("c-conf05", "w-conf11", "worker-rig", "https://pr/5")
 		if err == nil {
 			t.Error("second SubmitCompletion on already-completed item should return an error")
 		}
 
-		// Status should remain in_review
+		// Status should remain reviewing
 		got, err := store.QueryWanted("w-conf11")
 		if err != nil {
 			t.Fatalf("QueryWanted() error: %v", err)
 		}
-		if got.Status != "in_review" {
-			t.Errorf("Status = %q, want %q", got.Status, "in_review")
+		if got.Status != "reviewing" {
+			t.Errorf("Status = %q, want %q", got.Status, "reviewing")
 		}
 	})
 

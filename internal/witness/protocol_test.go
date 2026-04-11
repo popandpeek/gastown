@@ -545,7 +545,7 @@ func TestAssessHelp_Lifecycle(t *testing.T) {
 	t.Parallel()
 	payload := &HelpPayload{
 		Topic:   "Polecat zombie detected",
-		Problem: "Session dead but bead still in_progress",
+		Problem: "Session dead but bead still working",
 	}
 	assessment := AssessHelp(payload)
 	if assessment.Category != HelpCategoryLifecycle {

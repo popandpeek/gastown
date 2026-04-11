@@ -313,7 +313,7 @@ func runTrailBeads(cmd *cobra.Command, args []string) error {
 		switch b.Status {
 		case "open":
 			statusColor = style.Success
-		case "in_progress":
+		case "working":
 			statusColor = style.Warning
 		case "done", "merged":
 			statusColor = style.Info

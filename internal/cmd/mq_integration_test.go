@@ -65,7 +65,7 @@ func TestMockBeadsList_StatusFiltering(t *testing.T) {
 
 	// Add issues in various statuses
 	mock.addIssue(makeTestMR("mr-open", "polecat/A/gt-001", "integration/test", "A", "open"))
-	mock.addIssue(makeTestMR("mr-progress", "polecat/B/gt-002", "integration/test", "B", "in_progress"))
+	mock.addIssue(makeTestMR("mr-progress", "polecat/B/gt-002", "integration/test", "B", "working"))
 	mock.addIssue(makeTestMR("mr-closed", "polecat/C/gt-003", "integration/test", "C", "closed"))
 	mock.addIssue(makeTestMR("mr-blocked", "polecat/D/gt-004", "integration/test", "D", "blocked"))
 
@@ -100,8 +100,8 @@ func TestMockBeadsList_StatusFiltering(t *testing.T) {
 			wantIDs:   map[string]bool{"mr-closed": true},
 		},
 		{
-			name:      "status=in_progress returns only in_progress",
-			status:    "in_progress",
+			name:      "status=working returns only working",
+			status:    "working",
 			wantCount: 1,
 			wantIDs:   map[string]bool{"mr-progress": true},
 		},

@@ -1690,10 +1690,15 @@ func runPolecatPoolInit(cmd *cobra.Command, args []string) error {
 		poolSize = polecatPoolInitSize
 	}
 
-	// Determine names: rig config > name pool theme
+	// Determine names: rig config > settings namepool custom names > name pool theme
 	var fixedNames []string
 	if cfgErr == nil && len(rigCfg.PolecatNames) > 0 {
 		fixedNames = rigCfg.PolecatNames
+	} else if namePool := mgr.GetNamePool(); len(namePool.CustomNames) > 0 {
+		// Fix for gastown#3594: pool-init was ignoring settings/config.json namepool.
+		// The Manager's namepool reads custom names from settings/config.json,
+		// so use those instead of falling through to theme-based allocation.
+		fixedNames = namePool.CustomNames
 	}
 
 	// List existing polecats to avoid recreating them

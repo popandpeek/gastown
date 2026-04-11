@@ -105,7 +105,7 @@ func (f *fakeWLCommonsStore) SubmitCompletion(completionID, wantedID, rigHandle,
 	if item.ClaimedBy != rigHandle {
 		return fmt.Errorf("wanted item %q is not claimed by %q (claimed by %q)", wantedID, rigHandle, item.ClaimedBy)
 	}
-	item.Status = "in_review"
+	item.Status = "reviewing"
 	return nil
 }
 

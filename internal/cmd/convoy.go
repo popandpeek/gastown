@@ -1081,7 +1081,7 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Convoy %s has %d open issue(s):\n\n", style.Warning.Render("⚠"), convoyID, len(openIssues))
 			for _, t := range openIssues {
 				status := "○"
-				if t.Status == "in_progress" || t.Status == "hooked" {
+				if t.Status == "working" || t.Status == "hooked" {
 					status = "▶"
 				}
 				fmt.Printf("    %s %s: %s [%s]\n", status, t.ID, t.Title, t.Status)
@@ -1242,7 +1242,7 @@ func runConvoyLand(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Convoy %s has %d open issue(s):\n\n", style.Warning.Render("⚠"), convoyID, len(openIssues))
 		for _, t := range openIssues {
 			status := "○"
-			if t.Status == "in_progress" || t.Status == "hooked" {
+			if t.Status == "working" || t.Status == "hooked" {
 				status = "▶"
 			}
 			fmt.Printf("    %s %s: %s [%s]\n", status, t.ID, t.Title, t.Status)
@@ -1597,7 +1597,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 // isReadyIssue checks if an issue is ready for dispatch (stranded).
 // An issue is ready if:
 // - status = "open" AND (no assignee OR assignee session is dead)
-// - OR status = "in_progress"/"hooked" AND assignee session is dead (orphaned molecule)
+// - OR status = "working"/"hooked" AND assignee session is dead (orphaned molecule)
 // - AND not blocked (cross-rig-aware from issue details)
 // scheduledSet is a pre-computed set of bead IDs with open sling contexts (from areScheduled).
 func isReadyIssue(t trackedIssueInfo, scheduledSet map[string]bool) bool {
@@ -1640,7 +1640,7 @@ func isReadyIssue(t trackedIssueInfo, scheduledSet map[string]bool) bool {
 	checkCmd := tmux.BuildCommand("has-session", "-t", sessionName)
 	if err := checkCmd.Run(); err != nil {
 		// Session doesn't exist = orphaned molecule or dead worker
-		// This is the key fix: issues with in_progress/hooked status but
+		// This is the key fix: issues with working/hooked status but
 		// dead workers are now correctly detected as stranded
 		return true
 	}
@@ -1887,12 +1887,12 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	if len(tracked) > 0 {
 		fmt.Printf("\n  %s\n", style.Bold.Render("Tracked Issues:"))
 		for _, t := range tracked {
-			// Status symbol: ✓ closed, ▶ in_progress/hooked, ○ other
+			// Status symbol: ✓ closed, ▶ working/hooked, ○ other
 			status := "○"
 			switch t.Status {
 			case "closed":
 				status = "✓"
-			case "in_progress", "hooked":
+			case "working", "hooked":
 				status = "▶"
 			}
 
@@ -2110,12 +2110,12 @@ func printConvoyTree(townBeads string, convoys []struct {
 				connector = "└──"
 			}
 
-			// Status symbol: ✓ closed, ▶ in_progress/hooked, ○ other
+			// Status symbol: ✓ closed, ▶ working/hooked, ○ other
 			status := "○"
 			switch t.Status {
 			case "closed":
 				status = "✓"
-			case "in_progress", "hooked":
+			case "working", "hooked":
 				status = "▶"
 			}
 
@@ -2164,7 +2164,7 @@ func formatConvoyStatus(status string) string {
 		return style.Warning.Render("●")
 	case "closed":
 		return style.Success.Render("✓")
-	case "in_progress":
+	case "working":
 		return style.Info.Render("→")
 	default:
 		return status

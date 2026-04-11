@@ -522,7 +522,7 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 }
 
 // ClearAgentHookBead clears the hook_bead field on an agent bead.
-// Called by gt done after setting the work bead to in_review, so the Stop hook's
+// Called by gt done after setting the work bead to reviewing, so the Stop hook's
 // fallback query can discover new hooked beads on the next turn boundary.
 func (b *Beads) ClearAgentHookBead(id string) error {
 	empty := ""

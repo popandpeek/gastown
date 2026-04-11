@@ -39,7 +39,7 @@ func TestIsReadyIssue_BlockingAndStatus(t *testing.T) {
 		{
 			name: "non-open unassigned issue treated ready for recovery",
 			in: trackedIssueInfo{
-				Status:  "in_progress",
+				Status:  "working",
 				Blocked: false,
 			},
 			want: true,

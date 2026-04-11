@@ -143,7 +143,7 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 		hookedWork = getHookedWork(identity, 40, rigBeadsDir)
 	}
 
-	// Priority 2: Fall back to GT_ISSUE env var or in_progress beads
+	// Priority 2: Fall back to GT_ISSUE env var or working beads
 	currentWork := issue
 	if currentWork == "" && hookedWork == "" && session != "" {
 		currentWork = getCurrentWork(t, session, identity, 40)
@@ -157,7 +157,7 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 			parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
 		}
 	} else if currentWork != "" {
-		// Fall back to current work (in_progress)
+		// Fall back to current work (working)
 		if icon != "" {
 			parts = append(parts, fmt.Sprintf("%s %s", icon, currentWork))
 		} else {
@@ -718,7 +718,7 @@ func getHookedWork(identity string, maxLen int, beadsDir string) string {
 	return display
 }
 
-// getCurrentWork returns a truncated title of the first in_progress issue assigned to identity.
+// getCurrentWork returns a truncated title of the first working issue assigned to identity.
 // Uses the pane's working directory to find the beads.
 func getCurrentWork(t *tmux.Tmux, session string, identity string, maxLen int) string {
 	// Get the pane's working directory
@@ -733,10 +733,10 @@ func getCurrentWork(t *tmux.Tmux, session string, identity string, maxLen int) s
 		return ""
 	}
 
-	// Query beads for in_progress issues assigned to this agent
+	// Query beads for working issues assigned to this agent
 	b := beads.New(workDir)
 	issues, err := b.List(beads.ListOptions{
-		Status:   "in_progress",
+		Status:   "working",
 		Assignee: identity,
 		Priority: -1,
 	})

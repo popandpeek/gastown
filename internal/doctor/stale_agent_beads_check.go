@@ -113,7 +113,7 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		// Also check wisps table for migrated agent beads
 		if wispMap, _ := bd.ListAgentBeadsFromWisps(); len(wispMap) > 0 {
 			for _, w := range wispMap {
-				if w.Status == "open" || w.Status == "in_progress" || w.Status == "hooked" {
+				if w.Status == "open" || w.Status == "working" || w.Status == "hooked" {
 					allBeads = append(allBeads, w)
 				}
 			}
@@ -144,7 +144,7 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	if townAgents, err := townBd.ListAgentBeads(); err == nil {
 		for id, issue := range townAgents {
 			// Skip closed/non-active beads
-			if issue.Status != "open" && issue.Status != "in_progress" && issue.Status != "hooked" {
+			if issue.Status != "open" && issue.Status != "working" && issue.Status != "hooked" {
 				continue
 			}
 			// Only check beads that are agent type

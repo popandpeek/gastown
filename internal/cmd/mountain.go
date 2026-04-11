@@ -429,7 +429,7 @@ func showMountainDetail(townBeads, inputID string) error {
 		switch {
 		case b.Status == "closed":
 			completed = append(completed, b.ID)
-		case b.Status == "in_progress" || b.Status == "hooked":
+		case b.Status == "working" || b.Status == "hooked":
 			active = append(active, b.ID)
 		case hasBeadLabel(townBeads, b.ID, "mountain:skipped"):
 			skipped = append(skipped, b.ID)

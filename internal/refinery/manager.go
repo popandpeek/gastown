@@ -553,7 +553,7 @@ func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*Merg
 		return nil, err
 	}
 
-	// Verify MR is open or in_progress (can't reject already closed)
+	// Verify MR is open or working (can't reject already closed)
 	if mr.IsClosed() {
 		return nil, fmt.Errorf("%w: MR is already closed with reason: %s", ErrClosedImmutable, mr.CloseReason)
 	}
@@ -622,10 +622,10 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 	// Set the source issue to deploying — GH Actions will close it after
 	// the release pipeline succeeds. This makes the bead visible in the
 	// Deploying kanban lane between merge and release.
-	// Try "deploying" (custom status) first, fall back to "in_progress" (built-in).
+	// Try "deploying" (custom status) first, fall back to "working" (built-in).
 	if mr.IssueID != "" {
 		deployed := false
-		for _, status := range []string{"deploying", "in_progress"} {
+		for _, status := range []string{"deploying", "working"} {
 			s := status
 			if err := b.Update(mr.IssueID, beads.UpdateOptions{Status: &s}); err != nil {
 				// Check if already terminal

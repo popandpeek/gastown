@@ -59,7 +59,7 @@ The bead has been reset to open with no assignee.`,
 			name: "different rig",
 			body: `Bead: bd-xyz
 Polecat: beads/alpha
-Previous Status: in_progress`,
+Previous Status: working`,
 			wantRig: "beads",
 		},
 	}

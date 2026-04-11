@@ -67,11 +67,12 @@ type IssueStatus string
 const (
 	StatusOpen       IssueStatus = "open"
 	StatusClosed     IssueStatus = "closed"
-	StatusInProgress IssueStatus = "in_progress"
+	StatusInProgress IssueStatus = "working"   // GASTOWN-CUSTOM: renamed from in_progress for Gas Town Kanban workflow
 	StatusTombstone  IssueStatus = "tombstone"
 	StatusBlocked    IssueStatus = "blocked"
-	StatusInReview    IssueStatus = "in_review"
-	StatusInPipeline  IssueStatus = "in_pipeline"
+	StatusPlanning   IssueStatus = "planning"  // GASTOWN-CUSTOM: added for Gas Town Kanban workflow
+	StatusInReview   IssueStatus = "reviewing"  // GASTOWN-CUSTOM: renamed from in_review for Gas Town Kanban workflow
+	StatusInPipeline IssueStatus = "deploying"  // GASTOWN-CUSTOM: renamed from in_pipeline for Gas Town Kanban workflow
 	// StatusPinned and StatusHooked are defined as untyped string constants in
 	// handoff.go. Use IssueStatusPinned/IssueStatusHooked for typed comparisons.
 	IssueStatusPinned IssueStatus = "pinned"
@@ -103,7 +104,7 @@ func (s IssueStatus) IsAwaitingMerge() bool {
 }
 
 // IsAssigned returns true if this status indicates the issue is actively
-// assigned to an agent (hooked or in_progress).
+// assigned to an agent (hooked or working).
 func (s IssueStatus) IsAssigned() bool {
 	switch s {
 	case IssueStatusHooked, StatusInProgress:

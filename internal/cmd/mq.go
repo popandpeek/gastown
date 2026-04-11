@@ -137,7 +137,7 @@ Lists all pending merge requests waiting to be processed.
 Output format:
   ID          STATUS       PRIORITY  BRANCH                    WORKER  AGE
   gt-mr-001   ready        P0        polecat/Nux/gp-xyz        Nux     5m
-  gt-mr-002   in_progress  P1        polecat/Toast/gt-abc      Toast   12m
+  gt-mr-002   working  P1        polecat/Toast/gt-abc      Toast   12m
   gt-mr-003   blocked      P1        polecat/Capable/gt-def    Capable 8m
               (waiting on gt-mr-001)
 
@@ -318,7 +318,7 @@ func init() {
 
 	// List flags
 	mqListCmd.Flags().BoolVar(&mqListReady, "ready", false, "Show only ready-to-merge (no blockers)")
-	mqListCmd.Flags().StringVar(&mqListStatus, "status", "", "Filter by status (open, in_progress, closed)")
+	mqListCmd.Flags().StringVar(&mqListStatus, "status", "", "Filter by status (open, working, closed)")
 	mqListCmd.Flags().StringVar(&mqListWorker, "worker", "", "Filter by worker name")
 	mqListCmd.Flags().StringVar(&mqListEpic, "epic", "", "Show MRs targeting integration/<epic>")
 	mqListCmd.Flags().BoolVar(&mqListJSON, "json", false, "Output as JSON")

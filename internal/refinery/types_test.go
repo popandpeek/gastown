@@ -15,7 +15,7 @@ func TestValidateTransition(t *testing.T) {
 	}{
 		// Valid transitions
 		{
-			name:    "open to in_progress (claim)",
+			name:    "open to working (claim)",
 			from:    MROpen,
 			to:      MRInProgress,
 			wantErr: false,
@@ -27,13 +27,13 @@ func TestValidateTransition(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "in_progress to closed (success/rejection)",
+			name:    "working to closed (success/rejection)",
 			from:    MRInProgress,
 			to:      MRClosed,
 			wantErr: false,
 		},
 		{
-			name:    "in_progress to open (failure/reassign)",
+			name:    "working to open (failure/reassign)",
 			from:    MRInProgress,
 			to:      MROpen,
 			wantErr: false,
@@ -60,7 +60,7 @@ func TestValidateTransition(t *testing.T) {
 			errType: ErrClosedImmutable,
 		},
 		{
-			name:    "closed to in_progress (immutable)",
+			name:    "closed to working (immutable)",
 			from:    MRClosed,
 			to:      MRInProgress,
 			wantErr: true,
@@ -106,7 +106,7 @@ func TestMergeRequest_Claim(t *testing.T) {
 		}
 	})
 
-	t.Run("claim from in_progress fails", func(t *testing.T) {
+	t.Run("claim from working fails", func(t *testing.T) {
 		mr := &MergeRequest{Status: MRInProgress}
 		err := mr.Claim()
 		if err == nil {
@@ -127,7 +127,7 @@ func TestMergeRequest_Claim(t *testing.T) {
 }
 
 func TestMergeRequest_Close(t *testing.T) {
-	t.Run("close from in_progress succeeds", func(t *testing.T) {
+	t.Run("close from working succeeds", func(t *testing.T) {
 		mr := &MergeRequest{Status: MRInProgress}
 		err := mr.Close(CloseReasonMerged)
 		if err != nil {
@@ -165,7 +165,7 @@ func TestMergeRequest_Close(t *testing.T) {
 }
 
 func TestMergeRequest_Reopen(t *testing.T) {
-	t.Run("reopen from in_progress succeeds", func(t *testing.T) {
+	t.Run("reopen from working succeeds", func(t *testing.T) {
 		mr := &MergeRequest{Status: MRInProgress}
 		err := mr.Reopen()
 		if err != nil {

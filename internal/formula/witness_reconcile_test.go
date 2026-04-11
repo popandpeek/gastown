@@ -118,8 +118,8 @@ func TestWitnessPatrolHasReconcileStep(t *testing.T) {
 	if !strings.Contains(mergeDesc, "close") || !strings.Contains(mergeDesc, "bead") {
 		t.Error("detect-merges description must mention closing beads")
 	}
-	if !strings.Contains(mergeDesc, "in_pipeline") {
-		t.Error("detect-merges description must mention in_pipeline status")
+	if !strings.Contains(mergeDesc, "deploying") {
+		t.Error("detect-merges description must mention deploying status")
 	}
 
 	// check-timer-gates must now depend on detect-merges (not directly on detect-reverts)

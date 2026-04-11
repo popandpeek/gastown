@@ -1486,7 +1486,7 @@ func collectHandoffState() string {
 	}
 
 	// Get in-progress beads
-	inProgressOutput, err := exec.Command("bd", "list", "--status=in_progress").Output()
+	inProgressOutput, err := exec.Command("bd", "list", "--status=working").Output()
 	if err == nil {
 		ipStr := strings.TrimSpace(string(inProgressOutput))
 		if ipStr != "" && !strings.Contains(ipStr, "No issues") {

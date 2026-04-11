@@ -203,9 +203,9 @@ func TestFormatStatus(t *testing.T) {
 			want:   "open",
 		},
 		{
-			name:   "in_progress status",
-			status: "in_progress",
-			want:   "in_progress",
+			name:   "working status",
+			status: "working",
+			want:   "working",
 		},
 		{
 			name:   "closed status",
@@ -239,7 +239,7 @@ func TestGetStatusIcon(t *testing.T) {
 		want   string
 	}{
 		{"open", "○"},
-		{"in_progress", "▶"},
+		{"working", "▶"},
 		{"closed", "✓"},
 		{"unknown", "•"},
 		{"", "•"},

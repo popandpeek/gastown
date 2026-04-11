@@ -575,7 +575,7 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 
 		if !mqIntegrationLandForce {
-			return fmt.Errorf("cannot land: %d children still open/in_progress (use --force to override)", len(openChildren))
+			return fmt.Errorf("cannot land: %d children still open/working (use --force to override)", len(openChildren))
 		}
 		fmt.Printf("  %s Proceeding anyway (--force)\n", style.Dim.Render("⚠"))
 	} else if len(children) > 0 {
@@ -734,11 +734,11 @@ func cleanupIntegrationBranch(g *git.Git, bd *beads.Beads, epicID, branchName, t
 }
 
 // findOpenMRsForIntegration finds all non-closed merge requests targeting an integration branch.
-// Uses Status "all" instead of "open" to catch in_progress MRs (refinery race),
+// Uses Status "all" instead of "open" to catch working MRs (refinery race),
 // then post-filters to exclude closed MRs.
 func findOpenMRsForIntegration(bd *beads.Beads, targetBranch string) ([]*beads.Issue, error) {
 	// List all merge requests at any priority (MRs have Type: "task" with label "gt:merge-request").
-	// Use Status "all" to catch in_progress MRs that the refinery may have picked up.
+	// Use Status "all" to catch working MRs that the refinery may have picked up.
 	opts := beads.ListOptions{
 		Label:    "gt:merge-request",
 		Status:   "all",

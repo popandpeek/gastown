@@ -145,8 +145,8 @@ func (dm *dogMol) closeRemainingSteps() {
 		if child.ID == "" || child.Status == "" {
 			continue
 		}
-		// Close any child that is still open/hooked/in_progress.
-		if child.Status == "open" || child.Status == "hooked" || child.Status == "in_progress" {
+		// Close any child that is still open/hooked/working.
+		if child.Status == "open" || child.Status == "hooked" || child.Status == "working" {
 			if _, err := dm.runBd("close", child.ID); err != nil {
 				dm.logger.Printf("dog_molecule: closeRemainingSteps: close %s failed: %v", child.ID, err)
 			} else {

@@ -151,11 +151,11 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// gate below still requires an explicit --force for deferred beads.
 	explicitForce := params.Force
 
-	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "in_progress") && !params.Force {
-		// Auto-force when hooked/in_progress agent's session is confirmed dead (gt-npzy, GH#1380).
+	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "working") && !params.Force {
+		// Auto-force when hooked/working agent's session is confirmed dead (gt-npzy, GH#1380).
 		// Mirrors the dead-agent detection in runSling (sling.go) so that
 		// programmatic dispatch also handles stale hooks from nuked polecats.
-		if (info.Status == "hooked" || info.Status == "in_progress") && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
+		if (info.Status == "hooked" || info.Status == "working") && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
 			fmt.Printf("  %s Hooked agent %s has no active session, auto-forcing dispatch...\n",
 				style.Warning.Render("⚠"), info.Assignee)
 			params.Force = true
@@ -176,7 +176,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// Send LIFECYCLE:Shutdown to the witness when force-stealing a bead from a
 	// live polecat. Without this, the old polecat becomes a zombie — still running
 	// but unaware it lost its hook. Mirrors the same logic in runSling (sling.go).
-	if (info.Status == "hooked" || info.Status == "in_progress") && params.Force && info.Assignee != "" {
+	if (info.Status == "hooked" || info.Status == "working") && params.Force && info.Assignee != "" {
 		assigneeParts := strings.Split(info.Assignee, "/")
 		if len(assigneeParts) >= 3 && assigneeParts[1] == "polecats" {
 			oldRigName := assigneeParts[0]
@@ -213,7 +213,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 			// or when the assigned agent's session is dead. This unblocks the daemon's
 			// stranded convoy scan which never passes --force.
 			stale := params.Force ||
-				(info.Assignee == "" && (info.Status == "open" || info.Status == "in_progress")) ||
+				(info.Assignee == "" && (info.Status == "open" || info.Status == "working")) ||
 				(info.Assignee != "" && isHookedAgentDeadFn(info.Assignee))
 			if stale {
 				fmt.Printf("  %s Burning %d stale molecule(s): %s\n",

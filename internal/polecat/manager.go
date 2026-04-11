@@ -1132,7 +1132,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 	}
 
 	// Unassign any work beads still pointing at this polecat (gt-e4u1).
-	// Without this, beads remain assigned to a ghost polecat (status in_progress,
+	// Without this, beads remain assigned to a ghost polecat (status working,
 	// assignee set) after removal, permanently stuck with no one working on them.
 	m.unassignWorkBeads(name)
 
@@ -1960,7 +1960,7 @@ func (m *Manager) Get(name string) (*Polecat, error) {
 
 // SetState updates a polecat's state.
 // In the beads model, state is derived from issue status:
-// - StateWorking: issue status set to in_progress
+// - StateWorking: issue status set to working
 // SetAgentState updates the agent bead's agent_state field.
 // This is called after a polecat session successfully starts to transition
 // from "spawning" to "working", making gt polecat identity show accurate status.
@@ -1988,12 +1988,12 @@ func (m *Manager) SetState(name string, state State) error {
 
 	switch state {
 	case StateWorking:
-		// Set issue to in_progress if there is one.
+		// Set issue to working if there is one.
 		// Skip if status is "hooked" — sling sets this, and changing it here causes
 		// merge conflicts when gt done runs. The polecat should claim work via gt prime,
 		// not have sling change status during spawn (gt-zecmc).
 		if issue != nil && issue.Status != beads.StatusHooked {
-			status := "in_progress"
+			status := string(beads.StatusInProgress)
 			if err := m.beads.Update(issue.ID, beads.UpdateOptions{Status: &status}); err != nil {
 				return fmt.Errorf("setting issue status: %w", err)
 			}
@@ -2025,7 +2025,7 @@ func (m *Manager) AssignIssue(name, issue string) error {
 
 	// Set the issue's assignee to this polecat
 	assignee := m.assigneeID(name)
-	status := "in_progress"
+	status := string(beads.StatusInProgress)
 	if err := m.beads.Update(issue, beads.UpdateOptions{
 		Assignee: &assignee,
 		Status:   &status,
@@ -2077,7 +2077,7 @@ func (m *Manager) ClearIssue(name string) error {
 func (m *Manager) unassignWorkBeads(name string) {
 	assignee := m.assigneeID(name)
 	// Check all active work statuses that could leave orphaned beads
-	for _, status := range []string{"open", "in_progress", beads.StatusHooked} {
+	for _, status := range []string{"open", string(beads.StatusInProgress), beads.StatusHooked} {
 		issues, err := m.beads.List(beads.ListOptions{
 			Status:   status,
 			Assignee: assignee,
@@ -2114,7 +2114,7 @@ func (m *Manager) unassignWorkBeads(name string) {
 //  1. Work bead status=hooked + assignee=<polecat> → working (authoritative source)
 //  2. Legacy agent hook_bead that still points to a currently hooked bead for this assignee
 //     → working (compatibility fallback during migration)
-//  3. Issue assigned via beads assignee (open/in_progress/hooked) → working
+//  3. Issue assigned via beads assignee (open/working/hooked) → working
 //  4. Live tmux session → working (session active even if assignment not yet recorded)
 //  5. agent_state=idle with no live session → idle
 //  6. None of the above → idle

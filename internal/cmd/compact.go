@@ -229,8 +229,8 @@ func runCompact(cmd *cobra.Command, args []string) error {
 					deleteWisp(bd, w, "molecule step past TTL", result)
 				} else {
 					reason := "open past TTL"
-					if w.Status == "in_progress" {
-						reason = "stuck in_progress past TTL"
+					if w.Status == "working" {
+						reason = "stuck working past TTL"
 					}
 					promoteWisp(bd, w, reason, result)
 				}

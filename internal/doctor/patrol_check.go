@@ -226,7 +226,7 @@ func (c *PatrolHooksWiredCheck) Fix(ctx *CheckContext) error {
 	return config.EnsureDaemonPatrolConfig(ctx.TownRoot)
 }
 
-// PatrolNotStuckCheck detects wisps that have been in_progress too long.
+// PatrolNotStuckCheck detects wisps that have been working too long.
 type PatrolNotStuckCheck struct {
 	BaseCheck
 	stuckThreshold time.Duration
@@ -241,7 +241,7 @@ func NewPatrolNotStuckCheck() *PatrolNotStuckCheck {
 	return &PatrolNotStuckCheck{
 		BaseCheck: BaseCheck{
 			CheckName:        "patrol-not-stuck",
-			CheckDescription: "Check for stuck patrol wisps (>1h in_progress)",
+			CheckDescription: "Check for stuck patrol wisps (>1h working)",
 			CheckCategory:    CategoryPatrol,
 		},
 		stuckThreshold: DefaultStuckThreshold,
@@ -301,8 +301,8 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// stuckWispsQuery selects in_progress issues for stuck-wisp detection via Dolt.
-const stuckWispsQuery = `SELECT id, title, status, updated_at FROM issues WHERE status = 'in_progress' ORDER BY updated_at ASC`
+// stuckWispsQuery selects working issues for stuck-wisp detection via Dolt.
+const stuckWispsQuery = `SELECT id, title, status, updated_at FROM issues WHERE status = 'working' ORDER BY updated_at ASC`
 
 // checkStuckWispsDolt queries the Dolt database for stuck wisps using bd sql.
 // Returns an error if the query fails (caller should fall back to JSONL).

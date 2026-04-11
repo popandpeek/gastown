@@ -10,12 +10,12 @@ import (
 	"github.com/steveyegge/gastown/internal/doltserver"
 )
 
-// NullAssigneeCheck detects in_progress beads with a NULL or empty assignee.
+// NullAssigneeCheck detects working beads with a NULL or empty assignee.
 //
 // These records arise from partial writes (crash mid-transaction or race
 // condition during bd update). They are invisible to bd show / bd list because
 // bd's deserialization fails silently on a NULL assignee, so the steps remain
-// stuck in_progress indefinitely and block molecule progress.
+// stuck working indefinitely and block molecule progress.
 //
 // Detection uses bd sql --csv (raw SQL passthrough, not affected by bd's ORM).
 // Fix resets status to open + clears assignee so the step can be re-dispatched,
@@ -38,18 +38,18 @@ func NewNullAssigneeCheck() *NullAssigneeCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "null-assignee-steps",
-				CheckDescription: "Check for in_progress beads with NULL assignee (invisible to bd, blocking indefinitely)",
+				CheckDescription: "Check for working beads with NULL assignee (invisible to bd, blocking indefinitely)",
 				CheckCategory:    CategoryCleanup,
 			},
 		},
 	}
 }
 
-const nullAssigneeSelectQuery = `SELECT id, title, updated_at FROM issues WHERE status = 'in_progress' AND (assignee IS NULL OR assignee = '') ORDER BY updated_at ASC`
+const nullAssigneeSelectQuery = `SELECT id, title, updated_at FROM issues WHERE status = 'working' AND (assignee IS NULL OR assignee = '') ORDER BY updated_at ASC`
 
-const nullAssigneeFixQuery = `UPDATE issues SET status = 'open', assignee = '' WHERE status = 'in_progress' AND (assignee IS NULL OR assignee = '')`
+const nullAssigneeFixQuery = `UPDATE issues SET status = 'open', assignee = '' WHERE status = 'working' AND (assignee IS NULL OR assignee = '')`
 
-// Run queries each rig database for in_progress beads with NULL/empty assignee.
+// Run queries each rig database for working beads with NULL/empty assignee.
 func (c *NullAssigneeCheck) Run(ctx *CheckContext) *CheckResult {
 	c.affected = nil
 
@@ -80,7 +80,7 @@ func (c *NullAssigneeCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:     c.Name(),
 			Status:   StatusOK,
-			Message:  "No in_progress beads with NULL assignee found",
+			Message:  "No working beads with NULL assignee found",
 			Category: c.Category(),
 		}
 	}
@@ -95,7 +95,7 @@ func (c *NullAssigneeCheck) Run(ctx *CheckContext) *CheckResult {
 		Name: c.Name(),
 		Status: StatusWarning,
 		Message: fmt.Sprintf(
-			"%d in_progress bead(s) with NULL assignee — invisible to bd, blocking molecule progress",
+			"%d working bead(s) with NULL assignee — invisible to bd, blocking molecule progress",
 			len(c.affected),
 		),
 		Details:  details,
@@ -129,7 +129,7 @@ func (c *NullAssigneeCheck) Fix(ctx *CheckContext) error {
 
 		// Commit the repair to Dolt history (non-fatal: repair is effective even
 		// without a version commit, but the commit gives audit visibility).
-		commitMsg := "fix: reset in_progress beads with null assignee (gt doctor)"
+		commitMsg := "fix: reset working beads with null assignee (gt doctor)"
 		if err := doltserver.CommitServerWorkingSet(ctx.TownRoot, db, commitMsg); err != nil {
 			// Non-fatal: data is already fixed, commit is best-effort.
 			_ = err
@@ -142,7 +142,7 @@ func (c *NullAssigneeCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
-// queryNullAssigneeBeads returns in_progress beads with NULL/empty assignee for a rig.
+// queryNullAssigneeBeads returns working beads with NULL/empty assignee for a rig.
 // Uses bd sql --csv (raw SQL passthrough, not affected by bd ORM deserialization).
 func queryNullAssigneeBeads(rigDir string) ([]nullAssigneeRow, error) {
 	cmd := exec.Command("bd", "sql", "--csv", nullAssigneeSelectQuery) //nolint:gosec // G204: args are constants

@@ -21,7 +21,7 @@ var wlDoneCmd = &cobra.Command{
 	Short: "Submit completion evidence for a wanted item",
 	Long: `Submit completion evidence for a claimed wanted item.
 
-Inserts a completion record and updates the wanted item status to 'in_review'.
+Inserts a completion record and updates the wanted item status to 'reviewing'.
 The item must be claimed by your rig.
 
 The --evidence flag provides the evidence URL (PR link, commit hash, etc.).
@@ -78,7 +78,7 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Completion ID: %s\n", completionID)
 	fmt.Printf("  Completed by: %s\n", rigHandle)
 	fmt.Printf("  Evidence: %s\n", wlDoneEvidence)
-	fmt.Printf("  Status: in_review\n")
+	fmt.Printf("  Status: reviewing\n")
 
 	return nil
 }
@@ -106,11 +106,11 @@ func submitDone(store doltserver.WLCommonsStore, wantedID, rigHandle, evidence, 
 }
 
 func submitDoneInLocalClone(localDir, wantedID, rigHandle, evidence, completionID string) error {
-	script := fmt.Sprintf(`UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
+	script := fmt.Sprintf(`UPDATE wanted SET status='reviewing', evidence_url='%s', updated_at=NOW()
   WHERE id='%s' AND status='claimed' AND claimed_by='%s';
 INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, completed_at)
   SELECT '%s', '%s', '%s', '%s', NOW()
-  FROM wanted WHERE id='%s' AND status='in_review' AND claimed_by='%s'
+  FROM wanted WHERE id='%s' AND status='reviewing' AND claimed_by='%s'
   AND NOT EXISTS (SELECT 1 FROM completions WHERE wanted_id='%s');
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl done: %s');`,

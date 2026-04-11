@@ -157,7 +157,7 @@ type vitalsStats struct{ total, open, inProgress, closed int }
 func queryVitalsStats(config *doltserver.Config, dbName string) *vitalsStats {
 	q := fmt.Sprintf("SELECT COUNT(*),"+
 		"SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),"+
-		"SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END),"+
+		"SUM(CASE WHEN status='working' THEN 1 ELSE 0 END),"+
 		"SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END) "+
 		"FROM %s.issues", dbName)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

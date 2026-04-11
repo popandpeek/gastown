@@ -166,14 +166,14 @@ func TestDetermineCIStatus(t *testing.T) {
 			want: "fail",
 		},
 		{
-			name: "pending when in_progress",
+			name: "pending when working",
 			checks: []struct {
 				State      string `json:"state"`
 				Status     string `json:"status"`
 				Conclusion string `json:"conclusion"`
 			}{
 				{Conclusion: "success"},
-				{Status: "in_progress"},
+				{Status: "working"},
 			},
 			want: "pending",
 		},
@@ -218,7 +218,7 @@ func TestDetermineCIStatus(t *testing.T) {
 				Conclusion string `json:"conclusion"`
 			}{
 				{Conclusion: "failure"},
-				{Status: "in_progress"},
+				{Status: "working"},
 			},
 			want: "fail",
 		},

@@ -55,7 +55,7 @@ type ScheduleOptions struct {
 	NoConvoy    bool     // Skip auto-convoy creation
 	Owned       bool     // Mark auto-convoy as caller-managed lifecycle
 	DryRun      bool     // Show what would be done without acting
-	Force       bool     // Force schedule even if bead is hooked/in_progress
+	Force       bool     // Force schedule even if bead is hooked/working
 	NoMerge     bool     // Skip merge queue on completion
 	ReviewOnly  bool     // Review-only mode: assignee evaluates and reports back, no merge/commit/push
 	Account     string   // Claude Code account handle
@@ -109,7 +109,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 		return nil
 	}
 
-	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "in_progress") && !opts.Force {
+	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "working") && !opts.Force {
 		return fmt.Errorf("bead %s is already %s to %s\nUse --force to override", beadID, info.Status, info.Assignee)
 	}
 

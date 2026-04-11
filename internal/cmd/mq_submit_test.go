@@ -60,7 +60,7 @@ func TestValidateMoleculePrereqs(t *testing.T) {
 			children: []*beads.Issue{
 				{ID: "gt-mol.1", Title: "Load context", Status: "closed"},
 				{ID: "gt-mol.2", Title: "Set up branch", Status: "open"},
-				{ID: "gt-mol.3", Title: "Implement", Status: "in_progress"},
+				{ID: "gt-mol.3", Title: "Implement", Status: "working"},
 				{ID: "gt-mol.4", Title: "Self-review", Status: "open"},
 				{ID: "gt-mol.5", Title: "Submit MR", Status: "open"},
 			},

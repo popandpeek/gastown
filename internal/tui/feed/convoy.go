@@ -378,7 +378,7 @@ func fetchMQEntries(townRoot string) []MQEntry {
 		}
 
 		// Fetch open and in-progress MRs
-		for _, status := range []string{"open", "in_progress"} {
+		for _, status := range []string{"open", "working"} {
 			items := listMQBeads(rigPath, status)
 			for _, item := range items {
 				entry := mqItemToEntry(item, rigName)
@@ -433,7 +433,7 @@ func mqItemToEntry(item mqListItem, rigName string) MQEntry {
 
 	// Map bead status to display status
 	switch item.Status {
-	case "in_progress":
+	case "working":
 		entry.Status = "merging"
 	case "open":
 		entry.Status = "queued"

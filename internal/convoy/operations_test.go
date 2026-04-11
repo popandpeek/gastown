@@ -111,7 +111,7 @@ func TestReadyIssueFilterLogic_SkipsNonOpenIssues(t *testing.T) {
 	// real store. Integration coverage lives in convoy_manager_integration_test.go.
 	tracked := []trackedIssue{
 		{ID: "gt-closed", Status: "closed", Assignee: ""},
-		{ID: "gt-inprog", Status: "in_progress", Assignee: "gastown/polecats/alpha"},
+		{ID: "gt-inprog", Status: "working", Assignee: "gastown/polecats/alpha"},
 		{ID: "gt-hooked", Status: "hooked", Assignee: "gastown/polecats/beta"},
 		{ID: "gt-assigned", Status: "open", Assignee: "gastown/polecats/gamma"},
 	}
@@ -130,7 +130,7 @@ func TestReadyIssueFilterLogic_FindsReadyIssue(t *testing.T) {
 	// why this tests the predicate inline rather than calling feedNextReadyIssue.
 	tracked := []trackedIssue{
 		{ID: "gt-closed", Status: "closed", Assignee: ""},
-		{ID: "gt-inprog", Status: "in_progress", Assignee: "gastown/polecats/alpha"},
+		{ID: "gt-inprog", Status: "working", Assignee: "gastown/polecats/alpha"},
 		{ID: "gt-ready", Status: "open", Assignee: ""},
 		{ID: "gt-also-ready", Status: "open", Assignee: ""},
 	}

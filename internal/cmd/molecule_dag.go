@@ -42,7 +42,7 @@ var moleculeDagCmd = &cobra.Command{
 
 Shows the dependency structure with execution tiers and status:
   ✓ done        - Step completed
-  ⧖ in_progress - Step being worked on
+  ⧖ working - Step being worked on
   ○ ready       - Step ready to execute (all deps met)
   ◌ blocked     - Step waiting on dependencies
 
@@ -329,7 +329,7 @@ func outputDAGTree(dag *DAGInfo) error {
 
 	// Legend
 	fmt.Println()
-	fmt.Printf("   %s done  %s in_progress  %s ready  %s blocked\n",
+	fmt.Printf("   %s done  %s working  %s ready  %s blocked\n",
 		style.Bold.Render("✓"), style.Bold.Render("⧖"), style.Bold.Render("○"), style.Dim.Render("◌"))
 
 	return nil
@@ -358,7 +358,7 @@ func printNode(dag *DAGInfo, id, prefix string, isLast bool, visited map[string]
 	switch node.Status {
 	case "closed":
 		icon = style.Bold.Render("✓")
-	case "in_progress":
+	case "working":
 		icon = style.Bold.Render("⧖")
 	case "ready":
 		icon = style.Bold.Render("○")
@@ -417,7 +417,7 @@ func outputDAGTiers(dag *DAGInfo) error {
 			switch node.Status {
 			case "closed":
 				icon = style.Bold.Render("✓")
-			case "in_progress":
+			case "working":
 				icon = style.Bold.Render("⧖")
 			case "ready":
 				icon = style.Bold.Render("○")
@@ -449,7 +449,7 @@ func outputDAGTiers(dag *DAGInfo) error {
 
 	// Legend
 	fmt.Println()
-	fmt.Printf("   %s done  %s in_progress  %s ready  %s blocked\n",
+	fmt.Printf("   %s done  %s working  %s ready  %s blocked\n",
 		style.Bold.Render("✓"), style.Bold.Render("⧖"), style.Bold.Render("○"), style.Dim.Render("◌"))
 
 	return nil

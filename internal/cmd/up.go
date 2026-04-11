@@ -336,7 +336,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Orphaned bead recovery: detect beads stuck in hooked/in_progress status
+	// Orphaned bead recovery: detect beads stuck in hooked/working status
 	// assigned to polecats that no longer exist (session dead + directory gone).
 	// After a crash, these beads sit orphaned until someone manually resets them.
 	// Running this before witnesses start avoids duplicate recovery. (gas-udp)
@@ -1013,7 +1013,7 @@ func waitForDoltReady(townRoot string) {
 	}
 }
 
-// recoverOrphanedBeads scans each rig for beads stuck in hooked/in_progress
+// recoverOrphanedBeads scans each rig for beads stuck in hooked/working
 // status assigned to polecats that no longer exist (tmux session dead AND
 // worktree directory removed). For each orphan, the bead is reset to open
 // and the deacon is notified for re-dispatch.

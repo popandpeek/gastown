@@ -261,7 +261,7 @@ func outputPolecatContext(ctx RoleContext) {
 	fmt.Println("1. Run `" + cli.Name() + " prime` - loads context and checks mail automatically")
 	fmt.Println("2. Check inbox - if mail shown, read with `" + cli.Name() + " mail read <id>`")
 	fmt.Println("3. Look for '📋 Work Assignment' messages for your task")
-	fmt.Println("4. If no mail, check `bd list --status=in_progress` for existing work")
+	fmt.Println("4. If no mail, check `bd list --status=working` for existing work")
 	fmt.Println()
 	fmt.Println("## Key Commands")
 	fmt.Println("- `" + cli.Name() + " mail inbox` - Check your inbox for work assignments")

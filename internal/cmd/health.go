@@ -196,11 +196,11 @@ func checkDatabaseHealth(port int) []DatabaseHealth {
 
 		// Issue counts
 		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM issues").Scan(&dh.Issues)
-		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM issues WHERE status IN ('open','in_progress')").Scan(&dh.OpenIssues)
+		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM issues WHERE status IN ('open','working')").Scan(&dh.OpenIssues)
 
 		// Wisp counts
 		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM wisps").Scan(&dh.Wisps)
-		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM wisps WHERE status IN ('open','hooked','in_progress')").Scan(&dh.OpenWisps)
+		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM wisps WHERE status IN ('open','hooked','working')").Scan(&dh.OpenWisps)
 
 		// Commit count
 		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dolt_log").Scan(&dh.Commits)

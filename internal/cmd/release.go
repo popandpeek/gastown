@@ -14,8 +14,8 @@ var releaseReason string
 var releaseCmd = &cobra.Command{
 	Use:     "release <issue-id>...",
 	GroupID: GroupWork,
-	Short:   "Release stuck in_progress issues back to pending",
-	Long: `Release one or more in_progress issues back to open/pending status.
+	Short:   "Release stuck working issues back to pending",
+	Long: `Release one or more working issues back to open/pending status.
 
 This is used to recover stuck steps when a worker dies mid-task.
 The issue is moved to "open" status and the assignee is cleared,

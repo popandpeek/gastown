@@ -319,10 +319,10 @@ func RenderID(id string) string {
 }
 
 // RenderStatus renders a status with semantic styling
-// in_progress/blocked/pinned get color; open/closed use standard text
+// working/blocked/pinned get color; open/closed use standard text
 func RenderStatus(status string) string {
 	switch status {
-	case "in_progress":
+	case "working":
 		return StatusInProgressStyle.Render(status)
 	case "blocked":
 		return StatusBlockedStyle.Render(status)
@@ -343,7 +343,7 @@ func RenderStatusIcon(status string) string {
 	switch status {
 	case "open":
 		return StatusIconOpen // no color - available but not urgent
-	case "in_progress":
+	case "working":
 		return StatusInProgressStyle.Render(StatusIconInProgress)
 	case "blocked":
 		return StatusBlockedStyle.Render(StatusIconBlocked)

@@ -88,7 +88,7 @@ Examples:
   gt hook show mayor                   # What's the mayor working on?
 
 Output format (one line):
-  gastown/polecats/nux: gt-abc123 'Fix the widget bug' [in_progress]`,
+  gastown/polecats/nux: gt-abc123 'Fix the widget bug' [working]`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runHookShow,
 }

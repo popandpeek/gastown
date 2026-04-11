@@ -2173,7 +2173,7 @@ func getBeadStatus(bd *BdCli, workDir, beadID string) (string, bool) {
 }
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
-// If the bead is in "hooked" or "in_progress" status, it:
+// If the bead is in "hooked" or "working" status, it:
 // 0. Checks if the polecat's work is already on main — if so, closes
 //    the bead instead of resetting (prevents re-dispatch of completed work)
 // 1. Records the respawn in the witness spawn-count ledger
@@ -2188,7 +2188,7 @@ func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName strin
 		return false
 	}
 	status, ok := getBeadStatus(bd, workDir, hookBead)
-	if !ok || (status != "hooked" && status != "in_progress") {
+	if !ok || (status != "hooked" && status != "working") {
 		return false
 	}
 
@@ -2312,11 +2312,11 @@ type DetectOrphanedBeadsResult struct {
 	Errors  []error
 }
 
-// DetectOrphanedBeads finds in_progress or hooked beads assigned to non-existent polecats.
+// DetectOrphanedBeads finds working or hooked beads assigned to non-existent polecats.
 //
 // This complements DetectZombiePolecats which scans FROM polecat directories.
 // If a polecat was nuked and its directory removed, DetectZombiePolecats won't
-// see it, but the bead remains in_progress/hooked. This function scans FROM
+// see it, but the bead remains working/hooked. This function scans FROM
 // beads to catch that case.
 func DetectOrphanedBeads(bd *BdCli, workDir, rigName string, router *mail.Router) *DetectOrphanedBeadsResult {
 	result := &DetectOrphanedBeadsResult{}
@@ -2327,13 +2327,13 @@ func DetectOrphanedBeads(bd *BdCli, workDir, rigName string, router *mail.Router
 	}
 	initRegistryFromTownRoot(townRoot)
 
-	// Scan both in_progress and hooked beads — resetAbandonedBead handles both
+	// Scan both working and hooked beads — resetAbandonedBead handles both
 	// states, and orphaned beads can be stuck in either.
 	var beadList []struct {
 		ID       string `json:"id"`
 		Assignee string `json:"assignee"`
 	}
-	for _, status := range []string{"in_progress", "hooked"} {
+	for _, status := range []string{"working", "hooked"} {
 		output, err := bd.Exec(workDir, "list", "--status="+status, "--json", "--limit=0")
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("listing %s beads: %w", status, err))
@@ -2447,7 +2447,7 @@ type DetectOrphanedMoleculesResult struct {
 // owning polecat no longer exists. For each orphaned molecule, it closes the
 // molecule and its descendant step issues, unblocking the parent work bead.
 //
-// Detection chain: hooked/in_progress bead → polecat assignee → check existence →
+// Detection chain: hooked/working bead → polecat assignee → check existence →
 // read attached_molecule → close molecule + descendants.
 //
 // This complements DetectZombiePolecats (which scans FROM polecat directories)
@@ -2466,13 +2466,13 @@ func DetectOrphanedMolecules(bd *BdCli, workDir, rigName string, router *mail.Ro
 	initRegistryFromTownRoot(townRoot)
 
 	// Step 1: List beads that could have attached molecules.
-	// Slung beads start as status=hooked; polecats may change them to in_progress.
+	// Slung beads start as status=hooked; polecats may change them to working.
 	type beadSummary struct {
 		ID       string `json:"id"`
 		Assignee string `json:"assignee"`
 	}
 	var allBeads []beadSummary
-	for _, status := range []string{"hooked", "in_progress"} {
+	for _, status := range []string{"hooked", "working"} {
 		output, err := bd.Exec(workDir, "list", "--status="+status, "--json", "--limit=0")
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("listing %s beads: %w", status, err))

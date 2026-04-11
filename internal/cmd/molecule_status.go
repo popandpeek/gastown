@@ -111,7 +111,7 @@ type MoleculeProgressInfo struct {
 	MoleculeID   string   `json:"molecule_id,omitempty"`
 	TotalSteps   int      `json:"total_steps"`
 	DoneSteps    int      `json:"done_steps"`
-	InProgress   int      `json:"in_progress_steps"`
+	InProgress   int      `json:"working_steps"`
 	ReadySteps   []string `json:"ready_steps"`
 	BlockedSteps []string `json:"blocked_steps"`
 	Percent      int      `json:"percent_complete"`
@@ -222,7 +222,7 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 		switch child.Status {
 		case "closed":
 			progress.DoneSteps++
-		case "in_progress":
+		case "working":
 			progress.InProgress++
 		case "open":
 			// Get full step info with dependencies
@@ -416,12 +416,12 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		// If no hooked beads found, also check in_progress beads assigned to this agent.
-		// This handles the case where work was claimed (status changed to in_progress)
+		// If no hooked beads found, also check working beads assigned to this agent.
+		// This handles the case where work was claimed (status changed to working)
 		// but the session was interrupted before completion. The hook should persist.
 		if len(hookedBeads) == 0 {
 			inProgressBeads, _ := b.List(beads.ListOptions{
-				Status:   "in_progress",
+				Status:   "working",
 				Assignee: target,
 				Priority: -1,
 			})
@@ -446,7 +446,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			}); err == nil && len(townHooked) > 0 {
 				hookedBeads = townHooked
 			} else if townInProgress, err := townB.List(beads.ListOptions{
-				Status:   "in_progress",
+				Status:   "working",
 				Assignee: target,
 				Priority: -1,
 			}); err == nil && len(townInProgress) > 0 {
@@ -637,7 +637,7 @@ func getMoleculeProgressInfo(b *beads.Beads, moleculeRootID string) (*MoleculePr
 		switch child.Status {
 		case "closed":
 			progress.DoneSteps++
-		case "in_progress":
+		case "working":
 			progress.InProgress++
 		case "open":
 			// Get full step info with dependencies
@@ -698,7 +698,7 @@ func determineNextAction(status MoleculeStatusInfo) string {
 	}
 
 	if len(status.Progress.ReadySteps) > 0 {
-		return fmt.Sprintf("Start next ready step: bd update %s --status=in_progress", status.Progress.ReadySteps[0])
+		return fmt.Sprintf("Start next ready step: bd update %s --status=working", status.Progress.ReadySteps[0])
 	}
 
 	if len(status.Progress.BlockedSteps) > 0 {
@@ -1053,7 +1053,7 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 		case "closed":
 			info.StepsComplete++
 			closedIDs[child.ID] = true
-		case "in_progress":
+		case "working":
 			inProgressSteps = append(inProgressSteps, child)
 		case "open":
 			openStepIDs = append(openStepIDs, child.ID)
@@ -1228,9 +1228,9 @@ func scanAllRigsForHookedBeads(townRoot, target string) []*beads.Issue {
 			return hookedBeads
 		}
 
-		// Also check for in_progress beads (work that was claimed but session interrupted)
+		// Also check for working beads (work that was claimed but session interrupted)
 		inProgressBeads, err := b.List(beads.ListOptions{
-			Status:   "in_progress",
+			Status:   "working",
 			Assignee: target,
 			Priority: -1,
 		})

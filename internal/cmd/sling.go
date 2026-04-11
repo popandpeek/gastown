@@ -595,13 +595,13 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	originalStatus := info.Status
 	originalAssignee := info.Assignee
 	force := slingForce // local copy to avoid mutating package-level flag
-	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "in_progress") && !force {
-		// Auto-force when hooked/in_progress agent's session is confirmed dead (gt-pqf9x, GH#1380).
+	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "working") && !force {
+		// Auto-force when hooked/working agent's session is confirmed dead (gt-pqf9x, GH#1380).
 		// This eliminates the #1 friction in convoy feeding: stale hooks from
 		// dead polecats blocking re-sling without --force.
 		// IMPORTANT: Stale-hook check must run BEFORE idempotency check so that
 		// a dead polecat with a matching target triggers re-sling, not a no-op.
-		if (info.Status == "hooked" || info.Status == "in_progress") && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
+		if (info.Status == "hooked" || info.Status == "working") && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
 			fmt.Printf("%s Hooked agent %s has no active session, auto-forcing re-sling...\n",
 				style.Warning.Render("⚠"), info.Assignee)
 			force = true
@@ -707,8 +707,8 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
 	}
 
-	// Handle --force when bead is already hooked/in_progress: send shutdown to old polecat and unhook (GH#1380)
-	if (info.Status == "hooked" || info.Status == "in_progress") && force && info.Assignee != "" {
+	// Handle --force when bead is already hooked/working: send shutdown to old polecat and unhook (GH#1380)
+	if (info.Status == "hooked" || info.Status == "working") && force && info.Assignee != "" {
 		fmt.Printf("%s Bead already hooked to %s, forcing reassignment...\n", style.Warning.Render("⚠"), info.Assignee)
 
 		// Determine requester identity from env vars, fall back to "gt-sling"
@@ -814,7 +814,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			// or when the assigned agent's session is dead. `force` already includes
 			// dead-agent auto-force from the status check above.
 			stale := force ||
-				(info.Assignee == "" && (info.Status == "open" || info.Status == "in_progress")) ||
+				(info.Assignee == "" && (info.Status == "open" || info.Status == "working")) ||
 				(info.Assignee != "" && isHookedAgentDeadFn(info.Assignee))
 			if slingDryRun {
 				fmt.Printf("  Would burn %d stale molecule(s): %s\n",

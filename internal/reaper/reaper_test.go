@@ -68,7 +68,7 @@ func TestParentExcludeJoin(t *testing.T) {
 	if !contains(joinClause, "parent-child") {
 		t.Error("parentExcludeJoin should filter on parent-child type")
 	}
-	if !contains(joinClause, "'open', 'hooked', 'in_progress'") {
+	if !contains(joinClause, "'open', 'hooked', 'working'") {
 		t.Error("parentExcludeJoin should check for open parent statuses")
 	}
 
@@ -90,7 +90,7 @@ func TestReapQueryNoDatabaseNameInjection(t *testing.T) {
 	dbName := "gt"
 	parentJoin, parentWhere := parentExcludeJoin(dbName)
 	whereClause := fmt.Sprintf(
-		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s", parentWhere)
+		"w.status IN ('open', 'hooked', 'working') AND w.created_at < ? AND %s", parentWhere)
 
 	// This is the fixed query — dbName is NOT in the Sprintf args.
 	idQuery := fmt.Sprintf(

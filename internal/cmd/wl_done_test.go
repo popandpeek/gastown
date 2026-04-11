@@ -57,8 +57,8 @@ func TestSubmitDone_Success(t *testing.T) {
 
 	// Verify status updated
 	item, _ := store.QueryWanted("w-abc")
-	if item.Status != "in_review" {
-		t.Errorf("Status = %q, want %q", item.Status, "in_review")
+	if item.Status != "reviewing" {
+		t.Errorf("Status = %q, want %q", item.Status, "reviewing")
 	}
 }
 
