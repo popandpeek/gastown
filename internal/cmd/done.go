@@ -288,12 +288,23 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			fmt.Printf("\n%s Uncommitted changes detected — auto-saving to prevent work loss\n", style.Bold.Render("⚠"))
 			fmt.Printf("  Files: %s\n\n", workStatus.String())
 
-			// Stage all changes (git add -A), then unstage overlay files (gt-p35).
-			if addErr := g.Add("-A"); addErr != nil {
+			// POPANDPEEK-FORK BEGIN: be-m62zy — gt-pvx auto-save uses git add -u (skip untracked).
+			// Stage only MODIFICATIONS to already-tracked files — NEVER untracked files.
+			// Historical bug (be-m62zy): git add -A staged everything on disk, including
+			// compiled tsc/vite .js siblings that had been produced by a polecat sandbox
+			// but were never tracked. These artifacts ended up in 5+ PRs in 2026-04-10/12
+			// (#694, #702, #714, #717 among others) and contaminated release. The contract
+			// is now: auto-save is a safety net for FORGOTTEN commits on tracked files,
+			// not a catch-all for untracked artifacts. Polecats that legitimately create
+			// NEW source files must `git add` them explicitly before `gt done`.
+			if addErr := g.Add("-u"); addErr != nil {
 				style.PrintWarning("auto-commit: git add failed: %v — uncommitted work may be at risk", addErr)
 			} else {
-				// Unstage Gas Town overlay files that git add -A picked up.
-				// These are runtime artifacts that must not be committed to repos.
+				// Unstage Gas Town overlay files that git add -u picked up.
+				// CLAUDE.md and CLAUDE.local.md are tracked files (provisioned at
+				// polecat spawn) so -u still stages their modifications — this reset
+				// keeps the overlay content out of repo commits.
+				// POPANDPEEK-FORK END
 				_ = g.ResetFiles("CLAUDE.local.md")
 				// Only unstage CLAUDE.md if it contains the overlay marker
 				if claudeData, readErr := os.ReadFile(filepath.Join(cwd, "CLAUDE.md")); readErr == nil {
