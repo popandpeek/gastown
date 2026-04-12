@@ -872,7 +872,14 @@ func idlePolecatNames() map[string]bool {
 	// Query all agent beads across all rig directories
 	for _, dir := range beadsSearchDirs(townRoot) {
 		b := beads.New(dir)
-		out, err := b.Run("list", "--type=agent", "--json", "--limit=0")
+		// POPANDPEEK-FORK: label-based agent bead lookup (matches upstream #3547
+		// model — agent beads are now --type=task with --label=gt:agent. Fork-only
+		// function idlePolecatNames() not in upstream main, so the cherry-pick of
+		// #3547 did not update this site. Without this change, the query returns 0
+		// after the type switch and the daemon always spawns fresh polecats instead
+		// of reusing idle-done ones — efficiency regression flagged by emmett in
+		// PR #17 review.
+		out, err := b.Run("list", "--label=gt:agent", "--json", "--limit=0")
 		if err != nil {
 			continue
 		}

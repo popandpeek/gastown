@@ -1,3 +1,4 @@
+# POPANDPEEK-FORK: customized for popandpeek/gt town — base_branch=release (mirrors runtime restore 29eceb4, prevents gt formula install from re-clobbering runtime)
 description = """
 Conflict resolution workflow for polecats handling merge conflicts.
 
@@ -387,4 +388,4 @@ required = true
 
 [vars.base_branch]
 description = "The base branch to rebase on and push to (e.g., main, integration/epic-id)"
-default = "main"
+default = "release" # POPANDPEEK-FORK: release, not main
