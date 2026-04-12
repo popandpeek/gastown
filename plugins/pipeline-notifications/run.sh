@@ -69,6 +69,72 @@ nohup bash -c '
         echo "[$(date -Iseconds)] Failed to mail mayor: $TITLE" >> "'"$LOGFILE"'"
 
       echo "[$(date -Iseconds)] Forwarded: [$SEVERITY] $TITLE" >> "'"$LOGFILE"'"
+
+      # POPANDPEEK-FORK BEGIN: hq-kkata deacon BEAD_STATUS handler + live-drift reconciliation.
+      # Three cases are added below. The first two (witness routing + Released auto-restart)
+      # were hand-edited directly into the live watcher copy but never committed back to the
+      # gastown source — this block reconciles them. The third (BEAD_STATUS deacon auto-flip)
+      # is the primary hq-kkata fix: read ntfy BEAD_STATUS events and write bd update directly,
+      # removing witness claude cognition from the hot path. Research bead: be-xt1hj.
+      # Root-cause bead: be-oe0vb. Evidence: witness processed mails at 00:29-00:57 UTC yesterday
+      # but Dolt status did not flip until mayor manually batch-closed 14h12m later.
+      case "$TITLE" in
+        "BEAD_STATUS: "*" to "*)
+          # POPANDPEEK-FORK: hq-kkata deacon auto-flip — parse the title, look up current
+          # bead status, and flip via bd update. Idempotent: skip if current already matches
+          # and never flip backwards from terminal states. This is the hq-kkata fix.
+          BEAD_ID=$(echo "$TITLE" | grep -oE "\b[a-z]+-[a-z0-9]+" | head -1)
+          NEW_STATUS=$(echo "$TITLE" | sed -n "s/.* to \([a-z_]*\).*/\1/p")
+          PR_NUM=$(echo "$TITLE" | grep -oE "PR #[0-9]+" | grep -oE "[0-9]+" || true)
+          if [ -n "$BEAD_ID" ] && [ -n "$NEW_STATUS" ]; then
+            CURRENT=$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r ".[0].status // empty" 2>/dev/null || true)
+            if [ -z "$CURRENT" ]; then
+              echo "[$(date -Iseconds)] Deacon skip: $BEAD_ID not found" >> "'"$LOGFILE"'"
+            elif [ "$CURRENT" = "$NEW_STATUS" ]; then
+              echo "[$(date -Iseconds)] Deacon skip: $BEAD_ID already $NEW_STATUS" >> "'"$LOGFILE"'"
+            elif [ "$CURRENT" = "closed" ] || [ "$CURRENT" = "deferred" ]; then
+              echo "[$(date -Iseconds)] Deacon skip: $BEAD_ID terminal state $CURRENT, not flipping to $NEW_STATUS" >> "'"$LOGFILE"'"
+            else
+              NOTE="deacon auto-flip: $CURRENT to $NEW_STATUS via ntfy (PR #${PR_NUM:-?})"
+              if bd update "$BEAD_ID" --status "$NEW_STATUS" --append-notes "$NOTE" 2>/dev/null; then
+                echo "[$(date -Iseconds)] Deacon flipped: $BEAD_ID $CURRENT to $NEW_STATUS (PR #${PR_NUM:-?})" >> "'"$LOGFILE"'"
+              else
+                echo "[$(date -Iseconds)] Deacon FAILED: bd update $BEAD_ID to $NEW_STATUS" >> "'"$LOGFILE"'"
+              fi
+            fi
+          else
+            echo "[$(date -Iseconds)] Deacon skip: could not parse bead_id or status from title" >> "'"$LOGFILE"'"
+          fi
+          ;;
+      esac
+
+      # POPANDPEEK-FORK: witness routing — belt-and-suspenders backup for the deacon handler
+      # above, per emmett be-oe0vb backward-compat note. Retired in hq-eovky (follow-up) once
+      # the deacon handler has soaked. Restored from live-vs-source drift.
+      case "$TITLE" in
+        BEAD_STATUS:*|"PR merged:"*|"PR Validation | Passed"*)
+          WITNESS_ADDR="beacon/witness"
+          printf "%b" "$MAIL_BODY" | gt mail send "$WITNESS_ADDR" -s "CI [$SEVERITY]: $TITLE" --stdin 2>/dev/null || \
+            echo "[$(date -Iseconds)] Failed to mail witness: $TITLE" >> "'"$LOGFILE"'"
+          echo "[$(date -Iseconds)] Routed to witness: $TITLE" >> "'"$LOGFILE"'"
+          ;;
+        "Released "*|"REVERT: Released "*)
+          # POPANDPEEK-FORK: auto-restart beacon FE/BE on a new release tag. Kill BEFORE pull
+          # because Vite HMR crashes if source files change under it mid-run. Restored from
+          # live-vs-source drift — this case existed in the running watcher but was never
+          # committed back to the gastown source.
+          RELEASE_VERSION=$(echo "$TITLE" | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | head -1 || echo "unknown")
+          echo "[$(date -Iseconds)] Release detected ($RELEASE_VERSION) — triggering beacon restart" >> "'"$LOGFILE"'"
+          RESTART_SCRIPT="/home/ben/beacon/scripts/beacon-restart.sh"
+          if [ -x "$RESTART_SCRIPT" ]; then
+            "$RESTART_SCRIPT" "$RELEASE_VERSION" >> "'"$LOGFILE"'" 2>&1 &
+            echo "[$(date -Iseconds)] beacon-restart.sh launched (PID $!)" >> "'"$LOGFILE"'"
+          else
+            echo "[$(date -Iseconds)] WARNING: $RESTART_SCRIPT not found or not executable — skipping restart" >> "'"$LOGFILE"'"
+          fi
+          ;;
+      esac
+      # POPANDPEEK-FORK END
     done
 
     # If curl exits (network drop), wait and reconnect
