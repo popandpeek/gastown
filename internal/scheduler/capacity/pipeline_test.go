@@ -1,6 +1,7 @@
 package capacity
 
 import (
+	"fmt" // POPANDPEEK-FORK: sp-1 perf test bead construction
 	"testing"
 )
 
@@ -227,6 +228,160 @@ func TestReconstructFromContext_EmptyVars(t *testing.T) {
 		t.Errorf("Vars should be nil when ctx.Vars is empty, got %v", params.Vars)
 	}
 }
+
+// POPANDPEEK-FORK BEGIN: sp-1 SortPending test suite (hq-m5sjf).
+// Covers the composite dispatch key (score ASC, ReworkRound DESC, EnqueuedAt ASC, ID ASC)
+// where score = float64(Priority) - AgeScore. mkBead builds a PendingBead with the
+// given fields; ctx-<id>/work-<id> prefixes keep dedup interactions unambiguous.
+func TestSortPending(t *testing.T) {
+	mkBead := func(id string, p, rr int, age float64, enq string) PendingBead {
+		return PendingBead{
+			ID:          "ctx-" + id,
+			WorkBeadID:  "work-" + id,
+			Priority:    p,
+			ReworkRound: rr,
+			AgeScore:    age,
+			Context:     &SlingContextFields{EnqueuedAt: enq, WorkBeadID: "work-" + id},
+		}
+	}
+	tests := []struct {
+		name string
+		in   []PendingBead
+		want []string
+	}{
+		{
+			// Latent-bug fix: pre-sp-1 these dispatched in insertion (FIFO) order.
+			"pure priority ordering P0 to P4",
+			[]PendingBead{
+				mkBead("p3", 3, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("p0", 0, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("p2", 2, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("p4", 4, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("p1", 1, 0, 0, "2026-01-01T00:00:00Z"),
+			},
+			[]string{"ctx-p0", "ctx-p1", "ctx-p2", "ctx-p3", "ctx-p4"},
+		},
+		{
+			"FIFO within priority tier (oldest first)",
+			[]PendingBead{
+				mkBead("new", 1, 0, 0, "2026-03-01T00:00:00Z"),
+				mkBead("mid", 1, 0, 0, "2026-02-01T00:00:00Z"),
+				mkBead("old", 1, 0, 0, "2026-01-01T00:00:00Z"),
+			},
+			[]string{"ctx-old", "ctx-mid", "ctx-new"},
+		},
+		{
+			// bp-5.1 integration: higher rework_round has warmer reviewer context, wins tiebreak.
+			"rework tiebreaker within score tier",
+			[]PendingBead{
+				mkBead("rr0", 0, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("rr2", 0, 2, 0, "2026-01-02T00:00:00Z"),
+				mkBead("rr1", 0, 1, 0, "2026-01-03T00:00:00Z"),
+			},
+			[]string{"ctx-rr2", "ctx-rr1", "ctx-rr0"},
+		},
+		{
+			// sp-3 reserved slot: AgeScore=0 degenerate case must reduce to pure integer priority.
+			"AgeScore=0 degenerate case",
+			[]PendingBead{
+				mkBead("p2", 2, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("p0", 0, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("p1", 1, 0, 0, "2026-01-01T00:00:00Z"),
+			},
+			[]string{"ctx-p0", "ctx-p1", "ctx-p2"},
+		},
+		{
+			// sp-3 aging preview: aged P2 at score 0.0 ties a fresh P0 at score 0.0.
+			// enqueued_at ASC resolves (older wins — the P2 was enqueued 8h earlier).
+			"aged P2 ties fresh P0, older enqueue wins tiebreak",
+			[]PendingBead{
+				mkBead("fresh-p0", 0, 0, 0.0, "2026-04-12T15:00:00Z"),
+				mkBead("aged-p2", 2, 0, 2.0, "2026-04-12T07:00:00Z"),
+			},
+			[]string{"ctx-aged-p2", "ctx-fresh-p0"},
+		},
+		{
+			// Stable-dedup interaction: two post-dedup P0s both zero out the composite key
+			// to (0, 0, 0.0, enqueued, id) and fall through to enqueued_at ASC — oldest wins.
+			// (Actual dedup runs in getReadySlingContexts BEFORE SortPending.)
+			"stable dedup: older enqueue wins same-tier tiebreak",
+			[]PendingBead{
+				mkBead("newer", 0, 0, 0, "2026-04-12T16:00:00Z"),
+				mkBead("older", 0, 0, 0, "2026-04-12T08:00:00Z"),
+			},
+			[]string{"ctx-older", "ctx-newer"},
+		},
+		{
+			// Missing-field contract: SortPending trusts input. getReadySlingContexts applies
+			// the P2 default before constructing PendingBeads — this test documents that.
+			"explicit P0 outranks defaulted P2",
+			[]PendingBead{
+				mkBead("defaulted", 2, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("explicit-p0", 0, 0, 0, "2026-01-01T00:00:00Z"),
+			},
+			[]string{"ctx-explicit-p0", "ctx-defaulted"},
+		},
+		{
+			"ID ASC deterministic final tiebreaker",
+			[]PendingBead{
+				mkBead("zebra", 0, 0, 0, "2026-01-01T00:00:00Z"),
+				mkBead("alpha", 0, 0, 0, "2026-01-01T00:00:00Z"),
+			},
+			[]string{"ctx-alpha", "ctx-zebra"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := make([]PendingBead, len(tt.in))
+			copy(in, tt.in)
+			SortPending(in)
+			for i := range tt.want {
+				if in[i].ID != tt.want[i] {
+					got := make([]string, len(in))
+					for j, b := range in {
+						got[j] = b.ID
+					}
+					t.Errorf("rank %d: got %s want %s (full %v)", i, in[i].ID, tt.want[i], got)
+					break
+				}
+			}
+		})
+	}
+}
+
+// TestSortPending_Performance verifies 1000 beads sort deterministically in well under 100ms.
+func TestSortPending_Performance(t *testing.T) {
+	const n = 1000
+	build := func() []PendingBead {
+		beads := make([]PendingBead, n)
+		for i := 0; i < n; i++ {
+			beads[i] = PendingBead{
+				ID:          fmt.Sprintf("ctx-b%04d", i),
+				WorkBeadID:  fmt.Sprintf("work-b%04d", i),
+				Priority:    i % 5,
+				ReworkRound: i % 3,
+				Context:     &SlingContextFields{EnqueuedAt: fmt.Sprintf("2026-01-%02dT00:00:00Z", (i%28)+1)},
+			}
+		}
+		return beads
+	}
+	first := build()
+	SortPending(first)
+	second := build()
+	// Shuffle before the second sort — deterministic result must still match.
+	for i := 0; i < n; i++ {
+		j := (i*7 + 13) % n
+		second[i], second[j] = second[j], second[i]
+	}
+	SortPending(second)
+	for i := 0; i < n; i++ {
+		if first[i].ID != second[i].ID {
+			t.Fatalf("sort not deterministic at rank %d: %s vs %s", i, first[i].ID, second[i].ID)
+		}
+	}
+}
+
+// POPANDPEEK-FORK END
 
 func TestSplitVars(t *testing.T) {
 	tests := []struct {

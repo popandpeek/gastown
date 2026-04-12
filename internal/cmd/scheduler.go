@@ -704,6 +704,16 @@ func runSchedulerReorder(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unsupported reorder field %q (supported: priority)", schedulerReorderBy)
 	}
 
+	// POPANDPEEK-FORK BEGIN: sp-1 deprecation notice (hq-m5sjf).
+	// After sp-1 lands, priority ordering is automatic on every dispatch tick
+	// via capacity.SortPending. This command is obsolete — a follow-up PR will
+	// delete it after a 1-week soak period.
+	fmt.Fprintln(os.Stderr,
+		"WARNING: 'gt scheduler reorder --by priority' is deprecated.\n"+
+			"Priority ordering is now automatic on every dispatch tick (sp-1).\n"+
+			"This command will be removed in a follow-up PR after the soak period.")
+	// POPANDPEEK-FORK END
+
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return err

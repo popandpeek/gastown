@@ -300,13 +300,14 @@ func cleanupStaleContexts(townRoot string) {
 	}
 }
 
-// beadStatusInfo holds batch-fetched bead status and title.
+// beadStatusInfo holds batch-fetched bead status, title, and scheduling metadata.
 type beadStatusInfo struct {
-	Status string
-	Title  string
+	Status   string
+	Title    string
+	Priority int // POPANDPEEK-FORK: sp-1 priority-aware dispatch sort (hq-m5sjf)
 }
 
-// batchFetchBeadInfoByIDs returns a map of bead ID → status+title for specific beads.
+// batchFetchBeadInfoByIDs returns a map of bead ID → status+title+priority for specific beads.
 // Uses `bd show` with multiple IDs per rig directory instead of fetching all beads.
 // This avoids the O(minutes) latency of `bd list --all --json --limit=0` on large repos.
 func batchFetchBeadInfoByIDs(townRoot string, ids []string) map[string]beadStatusInfo {
@@ -330,13 +331,18 @@ func batchFetchBeadInfoByIDs(townRoot string, ids []string) map[string]beadStatu
 			continue
 		}
 		var items []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-			Title  string `json:"title"`
+			ID       string `json:"id"`
+			Status   string `json:"status"`
+			Title    string `json:"title"`
+			Priority int    `json:"priority"` // POPANDPEEK-FORK: sp-1 priority fetch
 		}
 		if err := json.Unmarshal(out, &items); err == nil {
 			for _, item := range items {
-				result[item.ID] = beadStatusInfo{Status: item.Status, Title: item.Title}
+				result[item.ID] = beadStatusInfo{
+					Status:   item.Status,
+					Title:    item.Title,
+					Priority: item.Priority, // POPANDPEEK-FORK: sp-1 priority fetch
+				}
 			}
 		}
 	}
@@ -367,11 +373,11 @@ func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 		return nil, readyErr
 	}
 
-	// 2b. Supplement with beads whose custom status is "ready".
-	// bd ready only returns beads with built-in status "open". The crew pipeline
-	// uses a custom "ready" status to mark beads as refined and dispatchable.
-	// Without this, beads transitioned to "ready" by crew are invisible to the
-	// scheduler and never dispatch.
+	// 2b. Supplement with beads whose custom status is "ready", AND fetch priority
+	// for the sp-1 dispatch sort. bd ready only returns beads with built-in status
+	// "open". The crew pipeline uses a custom "ready" status to mark beads as
+	// refined and dispatchable. Without this, beads transitioned to "ready" by
+	// crew are invisible to the scheduler and never dispatch.
 	var scheduledWorkIDs []string
 	for _, ctx := range allContexts {
 		fields := beads.ParseSlingContextFields(ctx.Description)
@@ -379,8 +385,11 @@ func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 			scheduledWorkIDs = append(scheduledWorkIDs, fields.WorkBeadID)
 		}
 	}
+	// POPANDPEEK-FORK: sp-1 hoist workBeadInfo out of the if-block so the
+	// main build loop can populate PendingBead.Priority from the same query.
+	var workBeadInfo map[string]beadStatusInfo
 	if len(scheduledWorkIDs) > 0 {
-		workBeadInfo := batchFetchBeadInfoByIDs(townRoot, scheduledWorkIDs)
+		workBeadInfo = batchFetchBeadInfoByIDs(townRoot, scheduledWorkIDs)
 		for _, id := range scheduledWorkIDs {
 			if info, found := workBeadInfo[id]; found && info.Status == "ready" {
 				readyWorkIDs[id] = true
@@ -389,9 +398,10 @@ func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 	}
 
 	// 3. Build PendingBead list — pure filtering, no mutations.
-	// Sort by EnqueuedAt for deterministic deduplication: when concurrent
+	// Sort by EnqueuedAt for deterministic DEDUPLICATION: when concurrent
 	// scheduleBead calls create multiple contexts for the same work bead,
-	// the oldest context always wins.
+	// the oldest context always wins. The dispatch order is set by the
+	// sp-1 SortPending call below after dedup completes.
 	sort.Slice(allContexts, func(i, j int) bool {
 		fi := beads.ParseSlingContextFields(allContexts[i].Description)
 		fj := beads.ParseSlingContextFields(allContexts[j].Description)
@@ -428,6 +438,16 @@ func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 		}
 		seenWork[fields.WorkBeadID] = true
 
+		// POPANDPEEK-FORK BEGIN: sp-1 populate priority from batch-fetched work bead info.
+		// Default P2 when unset (matches bd's default priority).
+		priority := 2
+		if workBeadInfo != nil {
+			if info, found := workBeadInfo[fields.WorkBeadID]; found {
+				priority = info.Priority
+			}
+		}
+		// POPANDPEEK-FORK END
+
 		result = append(result, capacity.PendingBead{
 			ID:          ctx.ID,
 			WorkBeadID:  fields.WorkBeadID,
@@ -436,8 +456,18 @@ func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 			Description: ctx.Description,
 			Labels:      ctx.Labels,
 			Context:     fields,
+			Priority:    priority, // POPANDPEEK-FORK: sp-1 priority sort key
+			// ReworkRound stays 0 until bp-5.1 wires its extraction.
+			// AgeScore stays 0 until sp-3 wires its aging computation.
 		})
 	}
+
+	// POPANDPEEK-FORK BEGIN: sp-1 priority-aware dispatch sort (hq-m5sjf).
+	// After dedup, re-order by the composite key (priority, rework, age, enqueued, id).
+	// This is the latent-bug fix — previously the result was in pure FIFO order
+	// regardless of priority, starving every P0 behind older P1/P2/P3s.
+	capacity.SortPending(result)
+	// POPANDPEEK-FORK END
 
 	return result, nil
 }

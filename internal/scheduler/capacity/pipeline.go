@@ -1,6 +1,9 @@
 package capacity
 
-import "strings"
+import (
+	"sort" // POPANDPEEK-FORK: sp-1 sort helper
+	"strings"
+)
 
 // PendingBead represents a bead that is scheduled and ready for dispatch evaluation.
 type PendingBead struct {
@@ -11,7 +14,62 @@ type PendingBead struct {
 	Description string
 	Labels      []string
 	Context     *SlingContextFields // Parsed sling params from context bead
+
+	// POPANDPEEK-FORK BEGIN: sp-1 priority-aware dispatch sort (hq-m5sjf)
+	// Populated by getReadySlingContexts from the work bead's bd metadata.
+	// Priority: lower = higher-priority (0 = P0). Default 2 (P2) when unset.
+	// ReworkRound: 0 = fresh, N = N-th rework bounce. Populated by bp-5.1 once that bead lands.
+	// AgeScore: aging boost from sp-3 (Layer 3). sp-1 leaves this at 0.0; sp-3 will populate.
+	Priority    int     // POPANDPEEK-FORK: sp-1 priority sort key
+	ReworkRound int     // POPANDPEEK-FORK: sp-1 rework tiebreaker, populated by bp-5.1
+	AgeScore    float64 // POPANDPEEK-FORK: sp-1 reserved slot for sp-3 aging
+	// POPANDPEEK-FORK END
 }
+
+// POPANDPEEK-FORK BEGIN: sp-1 SortPending helper (hq-m5sjf)
+// SortPending orders a slice of PendingBead by the sp-1 composite dispatch key:
+//
+//	score        ASC  — float64(Priority) - AgeScore. Lower = higher-priority.
+//	ReworkRound  DESC — within score tier, rework rounds have warmer reviewer context.
+//	EnqueuedAt   ASC  — within rework tier, FIFO (older first).
+//	ID           ASC  — deterministic final tiebreaker.
+//
+// The floating-point score is the primary key so sp-3's age-amplification can
+// modify effective priority (an 8h-old P2 with age_score=2.0 ties a fresh P0
+// at score 0.0). sp-1 leaves AgeScore at 0 so score == float64(Priority) and
+// behavior is exact integer priority ordering. sp-3 fills in the slot later.
+//
+// Stable dedup note: this sort happens AFTER the dedup pass in
+// getReadySlingContexts (which uses EnqueuedAt ASC to pick the oldest context
+// for each work bead). Two contexts for the same work bead are never both in
+// the slice passed here, so the sort is safe regardless of dedup semantics.
+func SortPending(pending []PendingBead) {
+	sort.SliceStable(pending, func(i, j int) bool {
+		a, b := pending[i], pending[j]
+		scoreA := float64(a.Priority) - a.AgeScore
+		scoreB := float64(b.Priority) - b.AgeScore
+		if scoreA != scoreB {
+			return scoreA < scoreB
+		}
+		if a.ReworkRound != b.ReworkRound {
+			return a.ReworkRound > b.ReworkRound
+		}
+		aEnq := ""
+		bEnq := ""
+		if a.Context != nil {
+			aEnq = a.Context.EnqueuedAt
+		}
+		if b.Context != nil {
+			bEnq = b.Context.EnqueuedAt
+		}
+		if aEnq != bEnq {
+			return aEnq < bEnq
+		}
+		return a.ID < b.ID
+	})
+}
+
+// POPANDPEEK-FORK END
 
 // SlingContextFields holds scheduling parameters stored on a sling context bead.
 // JSON-serialized as the context bead's description.
