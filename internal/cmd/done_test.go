@@ -1381,9 +1381,23 @@ func TestAutoCommitSafetyNet(t *testing.T) {
 	})
 
 	t.Run("auto-commit preserves work", func(t *testing.T) {
-		// Create implementation files
+		// POPANDPEEK-FORK BEGIN: be-m62zy — test updated to reflect the -u contract.
+		// Pre-fix: this test wrote a NEW file (handler.go), called g.Add("-A"),
+		// and asserted that auto-save caught it. Under the new contract (git add -u
+		// only stages modifications to already-tracked files), a new untracked file
+		// is NOT picked up by the auto-save safety net. The test now creates a
+		// tracked file first, commits it, then modifies it — that modification is
+		// what the auto-save is supposed to catch.
 		implFile := filepath.Join(dir, "handler.go")
 		if err := os.WriteFile(implFile, []byte("package main\n\nfunc handler() {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		testRunGit(t, dir, "add", "handler.go")
+		testRunGit(t, dir, "commit", "-m", "initial handler")
+
+		// Modify the tracked file (simulates polecat writing implementation work
+		// they forgot to commit before running gt done).
+		if err := os.WriteFile(implFile, []byte("package main\n\nfunc handler() { /* work */ }\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1396,8 +1410,8 @@ func TestAutoCommitSafetyNet(t *testing.T) {
 			t.Fatal("expected non-runtime uncommitted changes")
 		}
 
-		// Simulate the auto-commit safety net
-		if err := g.Add("-A"); err != nil {
+		// Simulate the auto-commit safety net — NOTE: -u (not -A) per be-m62zy fix.
+		if err := g.Add("-u"); err != nil {
 			t.Fatalf("git add: %v", err)
 		}
 		if err := g.Commit("fix: auto-save uncommitted implementation work (gt-pvx safety net)"); err != nil {
@@ -1412,7 +1426,69 @@ func TestAutoCommitSafetyNet(t *testing.T) {
 		if ws2.HasUncommittedChanges {
 			t.Error("expected clean working tree after auto-commit")
 		}
+		// POPANDPEEK-FORK END
 	})
+
+	// POPANDPEEK-FORK BEGIN: be-m62zy regression test — untracked compiled artifacts
+	// MUST NOT be staged by the auto-save safety net. This is the critical test
+	// that catches any future regression to `git add -A` behavior.
+	//
+	// Scenario: polecat modifies a tracked .ts source file AND vite/tsc produces
+	// an untracked .js sibling next to it in the worktree. When `gt done` runs
+	// the auto-save, only the .ts modification should be staged and committed.
+	// The .js must NOT appear in the commit tree.
+	t.Run("auto-commit excludes untracked compiled artifacts", func(t *testing.T) {
+		// Create a tracked .ts file in an initial commit.
+		tsFile := filepath.Join(dir, "src.ts")
+		if err := os.WriteFile(tsFile, []byte("export const x = 1;\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		testRunGit(t, dir, "add", "src.ts")
+		testRunGit(t, dir, "commit", "-m", "initial src.ts")
+
+		// Polecat modifies src.ts (legitimate implementation work).
+		if err := os.WriteFile(tsFile, []byte("export const x = 42;\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Compiler produces an untracked src.js sibling that MUST NOT land in git.
+		jsFile := filepath.Join(dir, "src.js")
+		if err := os.WriteFile(jsFile, []byte("exports.x = 42;\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(jsFile)
+
+		// Run the auto-save safety net path (git add -u → commit).
+		if err := g.Add("-u"); err != nil {
+			t.Fatalf("git add -u: %v", err)
+		}
+		if err := g.Commit("fix: auto-save uncommitted implementation work (gt-pvx safety net)"); err != nil {
+			t.Fatalf("git commit: %v", err)
+		}
+
+		// Assert: the commit contains src.ts but NOT src.js.
+		out, err := exec.Command("git", "-C", dir, "show", "--name-only", "--pretty=format:", "HEAD").Output()
+		if err != nil {
+			t.Fatalf("git show HEAD: %v", err)
+		}
+		committed := strings.TrimSpace(string(out))
+		if !strings.Contains(committed, "src.ts") {
+			t.Errorf("expected src.ts in commit, got: %q", committed)
+		}
+		if strings.Contains(committed, "src.js") {
+			t.Errorf("REGRESSION: src.js (untracked compiled artifact) leaked into commit: %q", committed)
+		}
+
+		// Assert: src.js is still untracked in the working tree (not staged, not committed).
+		statusOut, err := exec.Command("git", "-C", dir, "status", "--porcelain", "src.js").Output()
+		if err != nil {
+			t.Fatalf("git status src.js: %v", err)
+		}
+		if !strings.HasPrefix(string(statusOut), "??") {
+			t.Errorf("expected src.js to remain untracked after auto-save, git status: %q", statusOut)
+		}
+	})
+	// POPANDPEEK-FORK END
 
 	t.Run("runtime-only changes skip auto-commit", func(t *testing.T) {
 		// Runtime artifacts should NOT trigger auto-commit
