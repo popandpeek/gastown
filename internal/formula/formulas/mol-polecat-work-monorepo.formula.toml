@@ -1,3 +1,4 @@
+# POPANDPEEK-FORK: customized for popandpeek/gt town — base_branch=release (mirrors runtime restore 29eceb4, prevents gt formula install from re-clobbering runtime)
 description = """
 Full polecat work lifecycle for the monorepo rig, with CI validation and AI review handling.
 
@@ -564,7 +565,7 @@ required = true
 
 [vars.base_branch]
 description = "The base branch to rebase on and compare against (e.g., main, integration/epic-id)"
-default = "main"
+default = "release" # POPANDPEEK-FORK: release, not main
 
 [vars.setup_command]
 description = "Setup/install command (e.g., pnpm install). Empty = skip."

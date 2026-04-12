@@ -1,3 +1,4 @@
+# POPANDPEEK-FORK: customized for popandpeek/gt town — base_branch=release (mirrors runtime restore 29eceb4, prevents gt formula install from re-clobbering runtime)
 description = """
 Standing patrol for open PR review feedback and failing CI checks.
 
@@ -65,7 +66,7 @@ required = true
 
 [vars.base_branch]
 description = "Base branch filter — only PRs targeting this branch are scanned"
-default = "main"
+default = "release" # POPANDPEEK-FORK: release, not main
 
 [vars.scan_interval_seconds]
 description = "Seconds to sleep between patrol cycles"
