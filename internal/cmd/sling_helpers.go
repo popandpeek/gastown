@@ -831,7 +831,27 @@ func InstantiateFormulaOnBead(ctx context.Context, formulaName, beadID, title, h
 // Newer bd versions support this polymorphic path even when legacy wisp->bead
 // bonding fails with "not found" for the generated wisp ID.
 func bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot string, vars []string) (string, error) {
-	bondArgs := []string{"mol", "bond", formulaName, beadID, "--json", "--ephemeral"}
+	// POPANDPEEK-FORK BEGIN: be-m62zy era — drop --ephemeral, force --pour to avoid cross-type FK.
+	// Incident chain: dee628d3 (Apr 1 upstream "fix: route sling-context wisp to target rig") moved
+	// sling-context wisps into the same DB as work-bead issues, enabling cross-type bonds. The
+	// upstream-cherry-picked PR #3547 (b1db1628) "use type=task for agent beads" only addressed agent
+	// bead CREATION paths, NOT the bonding caller. After PR #17 merged today, dispatch was still
+	// failing with fk_wisp_dep_depends_on / fk_dep_depends_on at INSERT time in beads
+	// AddDependency (transaction.go:614) because the bonding call below STILL passed --ephemeral,
+	// which makes bd's mol_bond.go:400-407 force makeEphemeral=true and spawn a wisp-rooted proto.
+	// The wisp-rooted proto then bonds to be-* (an issue) → cross-type → FK violation.
+	//
+	// Switching to --pour explicitly forces makeEphemeral=false (per cmd/bd/mol_bond.go:400-407
+	// follow-target-with-flag-override semantics). Non-ephemeral spawn → spawn root is an issue,
+	// not a wisp → bond is issue→issue → routes to dependencies table → both FKs land in issues.id
+	// → no FK violation.
+	//
+	// Diagnosis trace: be-m62zy 911 thread, emmett bd source dive (cmd/bd/mol_bond.go:400-407),
+	// barry sling_helpers.go caller-chain read (this file lines 740-828). Mayor authorized variant
+	// #2 (--pour replacement, not plain --ephemeral drop) for explicit intent + future-proofing
+	// against wisp targets where the follow-target default would default to ephemeral.
+	bondArgs := []string{"mol", "bond", formulaName, beadID, "--json", "--pour"}
+	// POPANDPEEK-FORK END
 	for _, variable := range vars {
 		bondArgs = append(bondArgs, "--var", variable)
 	}
