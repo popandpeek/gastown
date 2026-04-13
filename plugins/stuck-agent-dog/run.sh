@@ -8,8 +8,29 @@ set -euo pipefail
 
 TOWN_ROOT="${GT_TOWN_ROOT:-$(gt town root 2>/dev/null)}"
 RIGS_JSON_PATH="${TOWN_ROOT}/mayor/rigs.json"
+DAEMON_JSON_PATH="${TOWN_ROOT}/mayor/daemon.json"
 
 log() { echo "[stuck-agent-dog] $*"; }
+
+# patrol_enabled <name> — returns 0 (enabled) if patrols.<name>.enabled is
+# true in daemon.json, or if daemon.json is missing / the patrol block is
+# absent (safe default: assume enabled, preserves pre-patch behavior).
+# Returns 1 only when .enabled is explicitly the boolean false. Used to
+# skip health checks for patrols the operator has deliberately disabled —
+# otherwise the plugin spam-escalates on deliberately-dead agents.
+#
+# Note: a naive `.patrols.<name>.enabled // "missing"` does not work here
+# because jq's // operator treats boolean false as "use the alternative",
+# so an explicitly-disabled patrol would look identical to an absent one.
+# We read the raw value ("true" | "false" | "null") and match on it.
+patrol_enabled() {
+  local name="$1"
+  [ -f "$DAEMON_JSON_PATH" ] || return 0
+  local value
+  value=$(jq -r --arg name "$name" '.patrols[$name].enabled' "$DAEMON_JSON_PATH" 2>/dev/null)
+  [ "$value" = "false" ] && return 1
+  return 0
+}
 
 # --- Enumerate agents ---------------------------------------------------------
 
@@ -44,9 +65,10 @@ while IFS='|' read -r RIG PREFIX; do
     SESSION_NAME="${PREFIX}-${PCAT_NAME}"
 
     if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-      # Session dead — check hook
+      # Session dead — check hook. `|| true` guards against pipefail when
+      # grep finds no "Hooked:" line (hookless polecat → empty HOOK_BEAD).
       HOOK_BEAD=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-        | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //')
+        | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //' || true)
 
       if [ -n "$HOOK_BEAD" ]; then
         # Check agent_state
@@ -66,9 +88,10 @@ while IFS='|' read -r RIG PREFIX; do
       if [ -n "$PANE_PID" ]; then
         PROC_COMM=$(ps -o comm= -p "$PANE_PID" 2>/dev/null)
         if [ -z "$PROC_COMM" ]; then
-          # Zombie: process dead, session alive
+          # Zombie: process dead, session alive. `|| true` guards pipefail
+          # on hookless zombies where grep finds no "Hooked:" line.
           HOOK_BEAD=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-            | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //')
+            | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //' || true)
           if [ -n "$HOOK_BEAD" ]; then
             STUCK+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD|agent_dead")
             log "  ZOMBIE: $SESSION_NAME (pid=$PANE_PID dead, hook=$HOOK_BEAD)"
@@ -94,7 +117,9 @@ log "=== Deacon Health ==="
 DEACON_SESSION="hq-deacon"
 DEACON_ISSUE=""
 
-if ! tmux has-session -t "$DEACON_SESSION" 2>/dev/null; then
+if ! patrol_enabled deacon; then
+  log "  SKIP: deacon patrol disabled in daemon.json — not checking session/heartbeat"
+elif ! tmux has-session -t "$DEACON_SESSION" 2>/dev/null; then
   log "  CRASHED: Deacon session is dead"
   DEACON_ISSUE="crashed"
 else
