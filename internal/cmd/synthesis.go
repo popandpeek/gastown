@@ -615,45 +615,10 @@ func slingSynthesis(beadID, targetRig string) error {
 }
 
 // findFormula searches for a formula file by name.
+// Delegates to findFormulaFile which has the correct 3-tier search
+// (project → town → user).
 func findFormula(name string) (string, error) {
-	searchPaths := []string{}
-
-	// 1. Project: cwd/.beads/formulas/
-	if cwd, err := os.Getwd(); err == nil {
-		searchPaths = append(searchPaths, filepath.Join(cwd, ".beads", "formulas"))
-	}
-
-	// 2. Town: townRoot/.beads/formulas/ (via workspace discovery)
-	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		searchPaths = append(searchPaths, filepath.Join(townRoot, ".beads", "formulas"))
-	}
-
-	// 3. User: ~/.beads/formulas/
-	if home, err := os.UserHomeDir(); err == nil {
-		searchPaths = append(searchPaths, filepath.Join(home, ".beads", "formulas"))
-	}
-
-	// 4. GT_ROOT/.beads/formulas/
-	if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
-		searchPaths = append(searchPaths, filepath.Join(gtRoot, ".beads", "formulas"))
-	}
-
-	// Try each search path
-	for _, searchPath := range searchPaths {
-		// Try with .formula.toml extension
-		path := filepath.Join(searchPath, name+".formula.toml")
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
-
-		// Try with .formula.json extension
-		path = filepath.Join(searchPath, name+".formula.json")
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
-	}
-
-	return "", fmt.Errorf("formula '%s' not found", name)
+	return findFormulaFile(name)
 }
 
 // CheckSynthesisReady checks if a convoy is ready for synthesis.
