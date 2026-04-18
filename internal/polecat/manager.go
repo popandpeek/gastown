@@ -290,6 +290,12 @@ func (m *Manager) CheckDoltHealth() error {
 // Fails closed if the check errors — a server that can't report capacity is likely
 // already under stress (gt-lfc0d).
 func (m *Manager) CheckDoltServerCapacity() error {
+	// NOTE: Prior to gt-lph, this method called workspace.Find to locate townRoot,
+	// which could fail and silently skip the capacity check (return nil). Now that
+	// m.townRoot is computed deterministically at Manager construction, errors from
+	// HasConnectionCapacity always propagate — this is intentional. A server that
+	// can't report capacity is likely under stress, and silently passing was a
+	// latent bug that allowed connection storms under load (gt-lfc0d).
 	hasCapacity, active, err := doltserver.HasConnectionCapacity(m.townRoot)
 	if err != nil {
 		// Fail closed: if we can't check capacity, the server may be overloaded.
