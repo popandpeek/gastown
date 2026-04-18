@@ -616,24 +616,17 @@ func slingSynthesis(beadID, targetRig string) error {
 
 // findFormula searches for a formula file by name.
 func findFormula(name string) (string, error) {
-	searchPaths := []string{}
-
-	// 1. Project: cwd/.beads/formulas/
-	if cwd, err := os.Getwd(); err == nil {
-		searchPaths = append(searchPaths, filepath.Join(cwd, ".beads", "formulas"))
+	// Search paths
+	searchPaths := []string{
+		".beads/formulas",
 	}
 
-	// 2. Town: townRoot/.beads/formulas/ (via workspace discovery)
-	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		searchPaths = append(searchPaths, filepath.Join(townRoot, ".beads", "formulas"))
-	}
-
-	// 3. User: ~/.beads/formulas/
+	// Add home directory formulas
 	if home, err := os.UserHomeDir(); err == nil {
 		searchPaths = append(searchPaths, filepath.Join(home, ".beads", "formulas"))
 	}
 
-	// 4. GT_ROOT/.beads/formulas/
+	// Add GT_ROOT formulas if set
 	if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
 		searchPaths = append(searchPaths, filepath.Join(gtRoot, ".beads", "formulas"))
 	}
