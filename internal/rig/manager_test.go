@@ -270,6 +270,11 @@ func TestAddRig_RejectsInvalidNames(t *testing.T) {
 		{"op-baby-test", `rig name "op-baby-test" contains invalid characters`},
 		{"hq", `rig name "hq" is reserved for town-level infrastructure`},
 		{"HQ", `rig name "HQ" is reserved for town-level infrastructure`},
+		{"deacon", `rig name "deacon" is reserved for town-level infrastructure`},
+		{"mayor", `rig name "mayor" is reserved for town-level infrastructure`},
+		{"daemon", `rig name "daemon" is reserved for town-level infrastructure`},
+		{"plugins", `rig name "plugins" is reserved for town-level infrastructure`},
+		{"settings", `rig name "settings" is reserved for town-level infrastructure`},
 	}
 
 	for _, tt := range tests {
@@ -1035,6 +1040,9 @@ func TestRegisterRig_RejectsReservedNames(t *testing.T) {
 	}{
 		{"hq", `rig name "hq" is reserved for town-level infrastructure`},
 		{"HQ", `rig name "HQ" is reserved for town-level infrastructure`},
+		{"deacon", `rig name "deacon" is reserved for town-level infrastructure`},
+		{"mayor", `rig name "mayor" is reserved for town-level infrastructure`},
+		{"daemon", `rig name "daemon" is reserved for town-level infrastructure`},
 	}
 
 	for _, tt := range tests {

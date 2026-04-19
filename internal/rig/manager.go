@@ -30,9 +30,12 @@ var (
 )
 
 // reservedRigNames are names that cannot be used for rigs because they
-// collide with town-level infrastructure. "hq" is special-cased by
-// EnsureMetadata and dolt routing as the town-level beads alias.
-var reservedRigNames = []string{"hq"}
+// collide with town-level infrastructure directories.
+var reservedRigNames = []string{
+	"hq", "mayor", "daemon", "deacon", "witness",
+	"plugins", "settings", "backups", "scripts", "hooks",
+	"docs", "events", "logs", "bin", "cass", "formula-overlays",
+}
 
 // wrapCloneError wraps clone errors with helpful suggestions.
 // Detects common auth failures and suggests SSH as an alternative.
