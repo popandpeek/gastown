@@ -176,8 +176,13 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 			settings.Namepool.MaxBeforeNumbering,
 		)
 	} else {
-		// Use defaults
-		pool = NewNamePool(r.Path, r.Name)
+		// Fallback: check rig-level config.json for polecat_names
+		// (pool-init and gt rig config write namepool config here).
+		if rigCfg, rcErr := rig.LoadRigConfig(r.Path); rcErr == nil && len(rigCfg.PolecatNames) > 0 {
+			pool = NewNamePoolWithConfig(r.Path, r.Name, "", rigCfg.PolecatNames, 0)
+		} else {
+			pool = NewNamePool(r.Path, r.Name)
+		}
 	}
 
 	// Set town root for custom theme resolution in getNames()

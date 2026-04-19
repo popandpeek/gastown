@@ -275,6 +275,32 @@ func TestAgentBeadID_Deterministic(t *testing.T) {
 	}
 }
 
+func TestNewManager_NamepoolFromRigConfig(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write rig config.json with polecat_names (no settings/config.json)
+	rigConfig := `{"polecat_names": ["alpha", "beta", "gamma"]}`
+	if err := os.WriteFile(filepath.Join(rigPath, "config.json"), []byte(rigConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "myrig", Path: rigPath}
+	m := NewManager(r, git.NewGit(rigPath), nil)
+	pool := m.GetNamePool()
+
+	name, err := pool.Allocate()
+	if err != nil {
+		t.Fatalf("Allocate error: %v", err)
+	}
+	if name != "alpha" {
+		t.Errorf("expected first name from rig config (alpha), got %q", name)
+	}
+}
+
 // Note: State persistence tests removed - state is now derived from beads assignee field.
 // Integration tests should verify beads-based state management.
 
