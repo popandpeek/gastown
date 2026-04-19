@@ -113,18 +113,18 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 // townRoot and rigName are used to load formula overlays (operator customizations).
 // extraVars is an optional list of "key=value" overrides that are substituted into
 // step descriptions before rendering, taking precedence over formula defaults.
-// loadFormulaContent tries embedded formulas first, then falls back to on-disk
-// search paths (project → town → user). Fixes #3322.
+// loadFormulaContent tries on-disk formulas first (user customizations win),
+// then falls back to embedded defaults. Fixes #3322.
 func loadFormulaContent(formulaName string) ([]byte, error) {
+	path, pathErr := findFormulaFile(formulaName)
+	if pathErr == nil {
+		return os.ReadFile(path)
+	}
 	content, err := formula.GetEmbeddedFormulaContent(formulaName)
 	if err == nil {
 		return content, nil
 	}
-	path, pathErr := findFormulaFile(formulaName)
-	if pathErr != nil {
-		return nil, fmt.Errorf("not found in embedded or on disk: %v", err)
-	}
-	return os.ReadFile(path)
+	return nil, fmt.Errorf("formula %q not found on disk or in embedded defaults", formulaName)
 }
 
 func showFormulaSteps(formulaName, label, townRoot, rigName string, extraVars ...[]string) {
