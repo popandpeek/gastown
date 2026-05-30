@@ -1283,16 +1283,48 @@ notifyWitness:
 	// instead of transitioning to IDLE. This gives fresh context windows
 	// per task, reduces token waste, and eliminates stale state bugs.
 	// Must be the LAST thing gt done does — everything above must complete first.
+	//
+	// POST-GUARD (gt-done-post-guard): When self-terminate is enabled, the
+	// process must exit immediately after spawning the session killer. Without
+	// this, there is a ~23-second window after gt done returns where the polecat
+	// LLM is still active and can run destructive commands (e.g., bd close) that
+	// prematurely close beads before the refinery reviews them. The fix:
+	//   1. Fork a background process to kill the tmux session after 1 second
+	//   2. Fire deferred telemetry (os.Exit skips defers)
+	//   3. os.Exit(0) immediately — never return to the caller
 	if isPolecat {
 		daemonCfg := config.LoadOperationalConfig(townRoot).GetDaemonConfig()
 		if daemonCfg.PolecatSelfTerminate != nil && *daemonCfg.PolecatSelfTerminate {
 			fmt.Printf("%s Self-terminating session (polecat_self_terminate=true)\n", style.Bold.Render("✓"))
 			sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
-			go func() {
-				time.Sleep(3 * time.Second)
-				t := tmux.NewTmux()
-				_ = t.KillSessionWithProcesses(sessionName)
-			}()
+
+			// Fork a background process to kill the tmux session. This process
+			// outlives the gt done process and handles the actual session cleanup.
+			// The 1-second delay ensures stdout flushes before the session dies.
+			killCmd := exec.Command("sh", "-c",
+				fmt.Sprintf("sleep 1 && tmux kill-session -t %s 2>/dev/null; exit 0",
+					sessionName))
+			killCmd.SysProcAttr = newSysProcAttrForDetach()
+			if err := killCmd.Start(); err != nil {
+				// Fallback: if we can't fork, do it in-process (original behavior).
+				// This is worse (has the window) but better than not terminating at all.
+				style.PrintWarning("could not fork session killer: %v (using in-process fallback)", err)
+				go func() {
+					time.Sleep(3 * time.Second)
+					t := tmux.NewTmux()
+					_ = t.KillSessionWithProcesses(sessionName)
+				}()
+				return nil
+			}
+
+			// Fire deferred telemetry manually — os.Exit skips defer.
+			telemetry.RecordDone(context.Background(), strings.ToUpper(doneStatus), nil)
+
+			// Exit immediately. This is the post-guard: the LLM process (Claude)
+			// gets back a completed command, but the forked session killer will
+			// terminate the entire tmux session within ~1 second, preventing any
+			// post-done commands from executing.
+			os.Exit(0)
 		}
 	}
 
