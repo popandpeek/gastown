@@ -5586,3 +5586,59 @@ func TestBuildStartupCommandWithAgentOverride_NoDoubleSettingsOnNonOverridePath(
 		t.Errorf("default Claude agent on polecat role should still get --settings, got: %q", cmd)
 	}
 }
+
+func TestAtomicWriteFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("writes file atomically", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "test.json")
+		data := []byte(`{"key": "value"}`)
+
+		if err := atomicWriteFile(path, data, 0644); err != nil {
+			t.Fatalf("atomicWriteFile: %v", err)
+		}
+
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		if string(got) != string(data) {
+			t.Errorf("content = %q, want %q", got, data)
+		}
+
+		info, _ := os.Stat(path)
+		if info.Mode().Perm() != 0644 {
+			t.Errorf("perm = %o, want 0644", info.Mode().Perm())
+		}
+	})
+
+	t.Run("overwrites existing file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "test.json")
+
+		os.WriteFile(path, []byte("old"), 0644)
+		if err := atomicWriteFile(path, []byte("new"), 0644); err != nil {
+			t.Fatalf("atomicWriteFile: %v", err)
+		}
+
+		got, _ := os.ReadFile(path)
+		if string(got) != "new" {
+			t.Errorf("content = %q, want %q", got, "new")
+		}
+	})
+
+	t.Run("no temp file left on success", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "test.json")
+
+		atomicWriteFile(path, []byte("data"), 0644)
+
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if e.Name() != "test.json" {
+				t.Errorf("unexpected file left behind: %s", e.Name())
+			}
+		}
+	})
+}

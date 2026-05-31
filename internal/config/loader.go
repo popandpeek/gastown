@@ -423,6 +423,8 @@ func warnDeprecatedMergeQueueKeys(data []byte, path string) {
 }
 
 // SaveRigSettings saves rig settings to a file.
+// Uses atomic write (temp file + rename) to prevent corruption from
+// concurrent polecat spawns reading/writing the same file.
 func SaveRigSettings(path string, settings *RigSettings) error {
 	if err := validateRigSettings(settings); err != nil {
 		return err
@@ -437,11 +439,38 @@ func SaveRigSettings(path string, settings *RigSettings) error {
 		return fmt.Errorf("encoding settings: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: settings files don't contain secrets
+	if err := atomicWriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing settings: %w", err)
 	}
 
 	return nil
+}
+
+// atomicWriteFile writes data to a temp file in the same directory, then
+// renames it to the target path. This prevents concurrent readers from
+// seeing a truncated or partial file during write.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil { //nolint:gosec // G302: perm passed by caller
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // LoadMayorConfig loads and validates a mayor config file.
@@ -1089,7 +1118,7 @@ func SaveTownSettings(path string, settings *TownSettings) error {
 		return fmt.Errorf("encoding settings: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: settings files don't contain secrets
+	if err := atomicWriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing settings: %w", err)
 	}
 
