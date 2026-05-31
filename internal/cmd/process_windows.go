@@ -4,11 +4,21 @@ package cmd
 
 import (
 	"math"
+	"syscall"
 
 	"golang.org/x/sys/windows"
 )
 
 const processStillActive = 259
+
+// newSysProcAttrForDetach returns SysProcAttr for Windows.
+// CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW detaches the child from the
+// parent's console group without flashing a visible console window.
+func newSysProcAttrForDetach() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		CreationFlags: 0x00000200 | 0x08000000, // CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+	}
+}
 
 // isProcessRunning checks if a process with the given PID exists.
 func isProcessRunning(pid int) bool {

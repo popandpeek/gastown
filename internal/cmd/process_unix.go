@@ -4,6 +4,14 @@ package cmd
 
 import "syscall"
 
+// newSysProcAttrForDetach returns SysProcAttr that detaches the child from
+// the parent's process group so it survives the caller's exit.
+func newSysProcAttrForDetach() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+}
+
 // isProcessRunning checks if a process with the given PID exists.
 func isProcessRunning(pid int) bool {
 	if pid <= 0 {
